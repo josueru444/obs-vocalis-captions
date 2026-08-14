@@ -312,6 +312,14 @@ set(GGML_OPENMP OFF CACHE BOOL "Disable OpenMP" FORCE)
 set(SAVE_WARNINGS_AS_ERRORS ${CMAKE_COMPILE_WARNING_AS_ERROR})
 set(CMAKE_COMPILE_WARNING_AS_ERROR OFF)
 
+# Apply local patches to whisper.cpp without committing to the submodule
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/patches")
+    file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/patches/CMakeLists.txt"
+         DESTINATION "${CMAKE_CURRENT_SOURCE_DIR}/vendor/whisper.cpp/ggml/src/ggml-vulkan/")
+    file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/patches/ggml-vulkan.cpp"
+         DESTINATION "${CMAKE_CURRENT_SOURCE_DIR}/vendor/whisper.cpp/ggml/src/ggml-vulkan/")
+endif()
+
 add_subdirectory(vendor/whisper.cpp SYSTEM)
 
 set(CMAKE_COMPILE_WARNING_AS_ERROR ${SAVE_WARNINGS_AS_ERRORS})
