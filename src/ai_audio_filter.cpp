@@ -107,6 +107,8 @@ struct ai_filter_data {
 
 	// ── Partial transcription mode ──────────────────────────────────────────
 	std::string partial_mode{"balanced"};
+
+	bool was_skipping{false};
 };
 
 	// Construct WebSocket URL with parameters
@@ -1049,6 +1051,24 @@ static void _flush_segment(ai_filter_data *filter_data)
 static struct obs_audio_data *ai_filter_audio(void *data, struct obs_audio_data *audio)
 {
 	ai_filter_data *filter_data = static_cast<ai_filter_data *>(data);
+
+	// Check if parent source is muted or inactive
+	obs_source_t *parent = obs_filter_get_parent(filter_data->context);
+	if (parent) {
+		bool is_muted = obs_source_muted(parent);
+		bool is_active = obs_source_active(parent);
+		bool should_skip = is_muted || !is_active;
+
+		if (filter_data->was_skipping != should_skip) {
+			blog(LOG_INFO, "[AI Translator] Audio processing %s (muted=%d, active=%d)", 
+				should_skip ? "PAUSED" : "RESUMED", is_muted, is_active);
+			filter_data->was_skipping = should_skip;
+		}
+
+		if (should_skip) {
+			return audio;
+		}
+	}
 
 	// Only process if a transcription backend is active
 	bool has_backend =

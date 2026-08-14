@@ -61,6 +61,24 @@ FetchContent_Declare(
 FetchContent_GetProperties(asio)
 if(NOT asio_POPULATED)
     FetchContent_Populate(asio)
+    # Patch Asio rfc2818_verification.ipp for OpenSSL 3.0+ compatibility
+    set(ASIO_IPP "${asio_SOURCE_DIR}/asio/include/asio/ssl/impl/rfc2818_verification.ipp")
+    if(EXISTS "${ASIO_IPP}")
+        file(READ "${ASIO_IPP}" asio_rfc)
+        string(REPLACE "domain->type == V_ASN1_IA5STRING && domain->data && domain->length" "domain && ASN1_STRING_type(domain) == V_ASN1_IA5STRING && ASN1_STRING_get0_data(domain) && ASN1_STRING_length(domain)" asio_rfc "${asio_rfc}")
+        string(REPLACE "reinterpret_cast<const char*>(domain->data)" "reinterpret_cast<const char*>(ASN1_STRING_get0_data(domain))" asio_rfc "${asio_rfc}")
+        string(REPLACE "domain->length" "ASN1_STRING_length(domain)" asio_rfc "${asio_rfc}")
+        string(REPLACE "ip_address->type == V_ASN1_OCTET_STRING && ip_address->data" "ip_address && ASN1_STRING_type(ip_address) == V_ASN1_OCTET_STRING && ASN1_STRING_get0_data(ip_address)" asio_rfc "${asio_rfc}")
+        string(REPLACE "ip_address->length" "ASN1_STRING_length(ip_address)" asio_rfc "${asio_rfc}")
+        string(REPLACE "ip_address->data" "ASN1_STRING_get0_data(ip_address)" asio_rfc "${asio_rfc}")
+        string(REPLACE "common_name && common_name->data && common_name->length" "common_name && ASN1_STRING_get0_data(common_name) && ASN1_STRING_length(common_name)" asio_rfc "${asio_rfc}")
+        string(REPLACE "reinterpret_cast<const char*>(common_name->data)" "reinterpret_cast<const char*>(ASN1_STRING_get0_data(common_name))" asio_rfc "${asio_rfc}")
+        string(REPLACE "common_name->length" "ASN1_STRING_length(common_name)" asio_rfc "${asio_rfc}")
+        string(REPLACE "X509_NAME* name = X509_get_subject_name(cert);" "const X509_NAME* name = X509_get_subject_name(cert);" asio_rfc "${asio_rfc}")
+        string(REPLACE "ASN1_STRING* common_name = 0;" "const ASN1_STRING* common_name = 0;" asio_rfc "${asio_rfc}")
+        string(REPLACE "X509_NAME_ENTRY* name_entry = X509_NAME_get_entry(name, i);" "const X509_NAME_ENTRY* name_entry = X509_NAME_get_entry(name, i);" asio_rfc "${asio_rfc}")
+        file(WRITE "${ASIO_IPP}" "${asio_rfc}")
+    endif()
 endif()
 
 # === websocket++ (header-only, avoid processing legacy CMakeLists.txt) ===
@@ -171,8 +189,7 @@ set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES AUTOMOC ON AUTOUIC ON)
 
 # Set base OBS plugin installation directory depending on OS
 if(WIN32)
-    file(TO_CMAKE_PATH "$ENV{APPDATA}" APPDATA_DIR)
-    set(OBS_PLUGIN_INSTALL_DIR "${APPDATA_DIR}/obs-studio/plugins/${CMAKE_PROJECT_NAME}")
+    set(OBS_PLUGIN_INSTALL_DIR "C:/Program Files/obs-studio")
 elseif(APPLE)
     set(OBS_PLUGIN_INSTALL_DIR "$ENV{HOME}/Library/Application Support/obs-studio/plugins/${CMAKE_PROJECT_NAME}")
 else()
@@ -181,27 +198,33 @@ endif()
 
 # Automate plugin copy to OBS on post-build
 if(WIN32)
-    set(OBS_GLOBAL_INSTALL_DIR "C:/Program Files/obs-studio")
     add_custom_command(TARGET ${CMAKE_PROJECT_NAME} POST_BUILD
             # Create directories
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${OBS_GLOBAL_INSTALL_DIR}/obs-plugins/64bit/"
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${OBS_GLOBAL_INSTALL_DIR}/data/obs-plugins/${CMAKE_PROJECT_NAME}/models/"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${OBS_PLUGIN_INSTALL_DIR}/obs-plugins/64bit/"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${OBS_PLUGIN_INSTALL_DIR}/data/obs-plugins/${CMAKE_PROJECT_NAME}/models/"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${OBS_PLUGIN_INSTALL_DIR}/data/obs-plugins/${CMAKE_PROJECT_NAME}/locale/"
 
             # Copy compiled binary and debug symbols
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:${CMAKE_PROJECT_NAME}>" "${OBS_GLOBAL_INSTALL_DIR}/obs-plugins/64bit/"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE_DIR:${CMAKE_PROJECT_NAME}>/$<TARGET_FILE_BASE_NAME:${CMAKE_PROJECT_NAME}>.pdb" "${OBS_GLOBAL_INSTALL_DIR}/obs-plugins/64bit/" || ${CMAKE_COMMAND} -E true
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:${CMAKE_PROJECT_NAME}>" "${OBS_PLUGIN_INSTALL_DIR}/obs-plugins/64bit/"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE_DIR:${CMAKE_PROJECT_NAME}>/$<TARGET_FILE_BASE_NAME:${CMAKE_PROJECT_NAME}>.pdb" "${OBS_PLUGIN_INSTALL_DIR}/obs-plugins/64bit/" || ${CMAKE_COMMAND} -E true
 
             # Copy models directory recursively only if it exists (models are optional in CI)
             COMMAND ${CMAKE_COMMAND}
                     -DSRC="${CMAKE_CURRENT_SOURCE_DIR}/models"
-                    -DDST="${OBS_GLOBAL_INSTALL_DIR}/data/obs-plugins/${CMAKE_PROJECT_NAME}/models"
+                    -DDST="${OBS_PLUGIN_INSTALL_DIR}/data/obs-plugins/${CMAKE_PROJECT_NAME}/models"
                     -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/copy_if_exists.cmake"
+                    
+            # Copy locale directory
+            COMMAND ${CMAKE_COMMAND}
+                    -DSRC="${CMAKE_CURRENT_SOURCE_DIR}/data/locale"
+                    -DDST="${OBS_PLUGIN_INSTALL_DIR}/data/obs-plugins/${CMAKE_PROJECT_NAME}/locale"
+                    -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/copy_if_exists.cmake" || ${CMAKE_COMMAND} -E true
 
-            COMMENT "Install plugin and models into C:/Program Files/obs-studio automatically (Requires Administrator privileges)..."
+            COMMENT "Install plugin and models into C:/Program Files/obs-studio automatically..."
     )
     if(OPENSSL_DLLS)
         add_custom_command(TARGET ${CMAKE_PROJECT_NAME} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENSSL_DLLS} "${OBS_GLOBAL_INSTALL_DIR}/obs-plugins/64bit/"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENSSL_DLLS} "${OBS_PLUGIN_INSTALL_DIR}/obs-plugins/64bit/"
             COMMAND_EXPAND_LISTS
         )
     endif()
@@ -243,18 +266,29 @@ set(GGML_AVX2 ON CACHE BOOL "" FORCE)
 set(GGML_FMA ON CACHE BOOL "" FORCE)
 set(GGML_F16C ON CACHE BOOL "" FORCE)
 
-# Vulkan GPU acceleration support (optional, only if SDK + shader compiler is available)
+# Vulkan GPU acceleration support (optional, only if SDK + shader compiler and SPIRV-Headers are available)
+if(DEFINED ENV{VULKAN_SDK})
+    unset(Vulkan_INCLUDE_DIR CACHE)
+    unset(Vulkan_LIBRARY CACHE)
+    unset(Vulkan_glslc_EXECUTABLE CACHE)
+    unset(Vulkan_glslangValidator_EXECUTABLE CACHE)
+    set(Vulkan_ROOT "$ENV{VULKAN_SDK}")
+    list(INSERT CMAKE_PREFIX_PATH 0 "$ENV{VULKAN_SDK}")
+    set(SPIRV-Headers_DIR "$ENV{VULKAN_SDK}/Lib/cmake" CACHE PATH "Vulkan SDK CMake dir" FORCE)
+endif()
+
 find_package(Vulkan QUIET COMPONENTS glslc)
 if(NOT Vulkan_FOUND)
     find_package(Vulkan QUIET COMPONENTS glslangValidator)
 endif()
+find_package(SPIRV-Headers QUIET)
 
-if(Vulkan_FOUND)
+if(Vulkan_FOUND AND SPIRV-Headers_FOUND)
     set(GGML_VULKAN ON CACHE BOOL "" FORCE)
-    message(STATUS "Vulkan SDK with shader compiler found — enabling GPU acceleration for whisper.cpp")
+    message(STATUS "Vulkan SDK with shader compiler and SPIRV-Headers found — enabling GPU acceleration for whisper.cpp")
 else()
     set(GGML_VULKAN OFF CACHE BOOL "" FORCE)
-    message(STATUS "Vulkan shader compiler not found — whisper.cpp will use CPU only")
+    message(STATUS "Vulkan requirements not fully met (SDK/compiler/SPIRV-Headers) — whisper.cpp will use CPU only")
 endif()
 
 # Disable strict GCC/Clang errors to prevent whisper.cpp build failure
