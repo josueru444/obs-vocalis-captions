@@ -2,6 +2,7 @@
 #include "audio_processor.h"
 #include "remote_transcriber.h"
 
+#include <obs-frontend-api.h>
 #include <media-io/audio-resampler.h>
 #include <obs-module.h>
 #include <util/threading.h>
@@ -25,9 +26,6 @@
 #include <map>
 
 // Define VAD parameters
-static const float SILENCE_RMS_THRESHOLD = 0.003f;
-static const size_t MIN_SPEECH_MS = 500;
-static const size_t SILENCE_HANGOVER_MS = 400; // Original: 600
 static const size_t MAX_SEGMENT_MS = 6000;      // Original: 15000
 static const size_t PREROLL_MS = 200;
 static const size_t OVERLAP_MS = 200;
@@ -82,6 +80,9 @@ struct ai_filter_data {
 	uint32_t obs_sample_rate{0};
 
 	// Manage VAD and segment queue
+	float vad_silence_rms_threshold{0.003f};
+	size_t vad_min_speech_ms{250};
+	size_t vad_silence_hangover_ms{800};
 	VadState vad;
 	std::queue<AudioSegment> segment_queue;
 	std::mutex queue_mutex;
@@ -331,7 +332,7 @@ static void transcription_worker(ai_filter_data *data)
 					is_speech = whisper_vad_detect_speech_no_reset(
 						data->vad_ctx, pcmf32.data(), pcmf32.size());
 				} else {
-					is_speech = (rms > SILENCE_RMS_THRESHOLD * 0.5f); // Sensitive threshold for RMS fallback
+					is_speech = (rms > data->vad_silence_rms_threshold * 0.5f); // Sensitive threshold for RMS fallback
 				}
 
 				size_t frame_ms = (pcmf32.size() * 1000) / 16000;
@@ -380,7 +381,7 @@ static void transcription_worker(ai_filter_data *data)
 						data->vad.speech_frames.insert(data->vad.speech_frames.end(),
 						                               pcmf32.begin(), pcmf32.end());
 						data->vad.silence_ms += frame_ms;
-						if (data->vad.silence_ms >= SILENCE_HANGOVER_MS) {
+						if (data->vad.silence_ms >= data->vad_silence_hangover_ms) {
 							_flush_segment(data);
 						} else {
 							const size_t interval = data->partial_send_interval_ms;
@@ -531,11 +532,14 @@ static bool on_remote_transcription_toggled(obs_properties_t *props, obs_propert
 
 
 
+// Removed on_create_source_toggled
+
 // Build OBS plugin properties UI
 obs_properties_t *ai_filter_get_properties(void *data)
 {
 	(void)data;
 	obs_properties_t *props = obs_properties_create();
+
 
 	// ── Group 1: Local Transcription Engine (Whisper) ─────────────────────────
 	obs_properties_t *group_model = obs_properties_create();
@@ -555,8 +559,6 @@ obs_properties_t *ai_filter_get_properties(void *data)
 	obs_properties_add_path(group_model, "custom_model_path", "O usa un modelo local (.bin):",
 	                        OBS_PATH_FILE,
 	                        "Modelos Whisper (*.bin);;Todos los archivos (*.*)", NULL);
-
-	obs_properties_add_int(group_model, "whisper_threads", "Hilos de CPU:", 1, 8, 1);
 
 	obs_properties_add_bool(group_model, "processing_mode", "Usar Tarjeta de Video (GPU)");
 	obs_properties_add_text(
@@ -590,10 +592,27 @@ obs_properties_t *ai_filter_get_properties(void *data)
 		group_translation, "trans_help",
 		"Nota: El motor local (Whisper) solo soporta traducir hacia el Inglés. El servidor remoto soporta todos.", OBS_TEXT_INFO);
 
-	obs_properties_add_group(props, "grp_translation", "2. Idioma de Entrada / Salida", OBS_GROUP_NORMAL,
+	obs_property_t *combo_target =
+		obs_properties_add_list(group_translation, "target_source_name", "Componente a usar:",
+		                        OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
+	obs_property_list_add_string(combo_target, "(No seleccionado / Inactivo)", "");
+
+	obs_enum_sources(
+		[](void *param, obs_source_t *source) {
+			obs_property_t *list = (obs_property_t *)param;
+			if (strcmp(obs_source_get_unversioned_id(source), "fuente_subtitulos_ia") == 0) {
+				const char *name = obs_source_get_name(source);
+				obs_property_list_add_string(list, name, name);
+			}
+			return true;
+		},
+		combo_target);
+	
+	obs_properties_add_group(props, "grp_translation", "2. Idioma y Visualización", OBS_GROUP_NORMAL,
 	                         group_translation);
 
-	// ── Group 3: Remote Transcription via WebSocket ───────────────────────────
+
+	// ── Group 4: Remote Transcription via WebSocket ───────────────────────────
 	obs_properties_t *group_remote = obs_properties_create();
 
 	obs_properties_add_text(group_remote, "ws_url", "URL del servidor WebSocket:",
@@ -630,27 +649,36 @@ obs_properties_t *ai_filter_get_properties(void *data)
 
 	obs_properties_add_int(props, "auto_clear_seconds", "Ocultar tras X segundos de silencio (0=nunca):", 0, 30, 1);
 
-	// ── Group 4: Partial Update Mode ─────────────────────────────────────────────
+	// ── Group 4: Visualización Avanzada (Flicker) ─────────────────────────────
 	obs_properties_t *group_partial = obs_properties_create();
 
 	obs_property_t *combo_partial =
 		obs_properties_add_list(group_partial, "partial_mode",
 		                        "Modo de actualización del texto:",
 		                        OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
-	obs_property_list_add_string(combo_partial, "Tiempo real  —  texto actualiza cada 1.5 segundos", "realtime");
-	obs_property_list_add_string(combo_partial, "Balanceado  —  texto actualiza cada 2.0 segundos", "balanced");
+	obs_property_list_add_string(combo_partial, "Tiempo real  —  texto actualiza cada 0.5 segundos", "realtime");
+	obs_property_list_add_string(combo_partial, "Balanceado  —  texto actualiza cada 1.0 segundos", "balanced");
 
 	obs_properties_add_text(
 		group_partial, "partial_mode_help",
-		"Tiempo real (1.5s): Buena fluidez sin parpadeo excesivo.\n"
-		"   El texto se construye más rápidamente mientras hablas.\n"
+		"Tiempo real (0.5s): Fluidez inmediata sin pausas.\n"
+		"   El texto fluye continuamente en pantalla mientras hablas.\n"
 		"\n"
-		"Balanceado (2.0s): Buen equilibrio entre velocidad y estabilidad.\n"
-		"   Recomendado para la mayoría de los casos de uso, especialmente con modelos grandes.",
+		"Balanceado (1.0s): Buen equilibrio entre velocidad y estabilidad.\n"
+		"   Recomendado si quieres darle a la IA más tiempo para pensar frases.",
 		OBS_TEXT_INFO);
 
-	obs_properties_add_group(props, "grp_partial", "4. Modo de Visualización de Texto",
+	obs_properties_add_group(props, "grp_partial", "4. Visualización Avanzada (Flicker)",
 	                         OBS_GROUP_NORMAL, group_partial);
+
+	// ── Group 5: Advanced Options ─────────────────────────────────────────────
+	obs_properties_t *group_advanced = obs_properties_create();
+	obs_properties_add_int(group_advanced, "whisper_threads", "Hilos de CPU (Whisper):", 1, 8, 1);
+	obs_properties_add_float_slider(group_advanced, "vad_rms", "Umbral de Silencio (RMS)", 0.001, 0.02, 0.001);
+	obs_properties_add_int_slider(group_advanced, "vad_min_speech", "Tiempo mínimo de habla (ms)", 100, 2000, 100);
+	obs_properties_add_int_slider(group_advanced, "vad_hangover", "Retención de silencio (ms)", 100, 2000, 100);
+	
+	obs_properties_add_group(props, "grp_advanced", "5. Opciones Avanzadas", OBS_GROUP_NORMAL, group_advanced);
 
 	return props;
 }
@@ -671,6 +699,7 @@ static void ai_filter_update(void *data, obs_data_t *settings)
 	std::string old_lang_out = fd->target_language;
 
 	// Update basic settings (no backend restart required)
+	fd->target_source_name = obs_data_get_string(settings, "target_source_name");
 	fd->current_language = obs_data_get_string(settings, "lang_in");
 	fd->target_language = obs_data_get_string(settings, "lang_out");
 	fd->local_translation = (fd->target_language == "en");
@@ -678,14 +707,17 @@ static void ai_filter_update(void *data, obs_data_t *settings)
 	fd->whisper_threads = (int)obs_data_get_int(settings, "whisper_threads");
 	fd->auto_clear_seconds = (int)obs_data_get_int(settings, "auto_clear_seconds");
 	fd->max_lines = (size_t)obs_data_get_int(settings, "max_lines");
+	fd->vad_silence_rms_threshold = (float)obs_data_get_double(settings, "vad_rms");
+	fd->vad_min_speech_ms = (size_t)obs_data_get_int(settings, "vad_min_speech");
+	fd->vad_silence_hangover_ms = (size_t)obs_data_get_int(settings, "vad_hangover");
 
 	// Map partial_mode string -> interval in ms (0 = finals only)
 	{
 		const char *mode = obs_data_get_string(settings, "partial_mode");
 		if (mode && strcmp(mode, "balanced") == 0)
-			fd->partial_send_interval_ms = 2000;
+			fd->partial_send_interval_ms = 1000;
 		else // "realtime" or default
-			fd->partial_send_interval_ms = 1500;
+			fd->partial_send_interval_ms = 500;
 		fd->partial_mode = mode ? mode : "balanced";
 	}
 
@@ -805,28 +837,46 @@ static void update_obs_text_source(ai_filter_data *data, const std::string &disp
 		if (!custom_source) {
 			obs_weak_source_release(data->subtitle_weak_ref);
 			data->subtitle_weak_ref = nullptr;
+		} else {
+			if (strcmp(obs_source_get_name(custom_source), data->target_source_name.c_str()) != 0) {
+				obs_source_release(custom_source);
+				custom_source = nullptr;
+				obs_weak_source_release(data->subtitle_weak_ref);
+				data->subtitle_weak_ref = nullptr;
+			}
 		}
 	}
 	
-	if (!custom_source) {
+	if (!custom_source && !data->target_source_name.empty()) {
+		using EnumParam = std::pair<obs_source_t **, std::string>;
+		EnumParam param = {&custom_source, data->target_source_name};
+
 		obs_enum_sources(
-			[](void *param, obs_source_t *source) {
-				obs_source_t **found = (obs_source_t **)param;
-				if (strcmp(obs_source_get_unversioned_id(source), "fuente_subtitulos_ia") == 0) {
-					*found = obs_source_get_ref(source);
+			[](void *p, obs_source_t *source) {
+				auto *search = (EnumParam *)p;
+				if (strcmp(obs_source_get_unversioned_id(source), "fuente_subtitulos_ia") == 0 &&
+				    strcmp(obs_source_get_name(source), search->second.c_str()) == 0) {
+					*(search->first) = obs_source_get_ref(source);
 					return false;
 				}
 				return true;
 			},
-			&custom_source);
+			&param);
 		if (custom_source) {
 			data->subtitle_weak_ref = obs_source_get_weak_source(custom_source);
 		}
 	}
 
 	if (custom_source != nullptr) {
+		std::string lang = data->target_language;
+		if (lang.empty() || lang == "original") lang = data->current_language;
+		if (lang == "auto") lang = "";
+		for (auto &c : lang) c = toupper(c);
+
 		obs_data_t *settings = obs_source_get_settings(custom_source);
 		obs_data_set_string(settings, "text", display_text.c_str());
+		obs_data_set_string(settings, "lang_code", lang.c_str());
+		
 		// Pass is_partial flag so the source can apply partial/final color
 		obs_data_set_bool(settings, "_is_partial", is_partial);
 		obs_source_update(custom_source, settings);
@@ -978,6 +1028,7 @@ static void ai_filter_destroy(void *data)
 // Set default filter settings
 static void ai_filter_get_defaults(obs_data_t *settings)
 {
+	obs_data_set_default_string(settings, "target_source_name", "");
 	obs_data_set_default_string(settings, "lang_in", "es");
 	obs_data_set_default_string(settings, "lang_out", "en");
 	obs_data_set_default_string(settings, "model_settings", "ggml-base.bin");
@@ -993,6 +1044,9 @@ static void ai_filter_get_defaults(obs_data_t *settings)
 	obs_data_set_default_int(settings, "auto_clear_seconds", 5);
 	obs_data_set_default_int(settings, "max_lines", 2);
 	obs_data_set_default_string(settings, "partial_mode", "balanced");
+	obs_data_set_default_double(settings, "vad_rms", 0.003);
+	obs_data_set_default_int(settings, "vad_min_speech", 200);
+	obs_data_set_default_int(settings, "vad_hangover", 800);
 }
 
 // Fetch audio buffer from pool
@@ -1012,7 +1066,7 @@ static std::vector<float>* get_audio_buffer(ai_filter_data *data)
 // Flush active speech segment to queue
 static void _flush_segment(ai_filter_data *filter_data)
 {
-	if (filter_data->vad.speech_ms >= MIN_SPEECH_MS) {
+	if (filter_data->vad.speech_ms >= filter_data->vad_min_speech_ms) {
 		AudioSegment seg;
 		seg.audio = get_audio_buffer(filter_data);
 		*seg.audio = filter_data->vad.speech_frames;
