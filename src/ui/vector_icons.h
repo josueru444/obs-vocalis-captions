@@ -118,6 +118,34 @@ public:
         return QIcon(pixmap);
     }
 
+    static QIcon iconClear(const QColor &color = QColor("#cccccc"), int size = 24)
+    {
+        QPixmap pixmap(size, size);
+        pixmap.fill(Qt::transparent);
+        QPainter p(&pixmap);
+        p.setRenderHint(QPainter::Antialiasing);
+
+        QPen pen(color, 1.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+        p.setPen(pen);
+        p.setBrush(Qt::NoBrush);
+
+        // Angled eraser body
+        QPainterPath path;
+        path.moveTo(size * 0.35, size * 0.18);
+        path.lineTo(size * 0.78, size * 0.61);
+        path.lineTo(size * 0.58, size * 0.81);
+        path.lineTo(size * 0.15, size * 0.38);
+        path.closeSubpath();
+        p.drawPath(path);
+
+        // Division line on eraser
+        p.drawLine(QPointF(size * 0.45, size * 0.28), QPointF(size * 0.25, size * 0.48));
+        // Base sweep underline
+        p.drawLine(QPointF(size * 0.48, size * 0.84), QPointF(size * 0.88, size * 0.84));
+
+        return QIcon(pixmap);
+    }
+
     static QIcon iconSettings(const QColor &color = QColor("#cccccc"), int size = 24)
     {
         QPixmap pixmap(size, size);

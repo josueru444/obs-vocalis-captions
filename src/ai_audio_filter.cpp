@@ -531,16 +531,57 @@ std::string get_filter_connection_status(void* data) {
 	return fd->connection_status;
 }
 
-FilterStatusInfo get_active_filter_status() {
+static ai_filter_data* get_filter_locked(void *filter_ptr) {
+	if (s_active_filters.empty()) return nullptr;
+	if (filter_ptr) {
+		for (ai_filter_data *fd : s_active_filters) {
+			if (static_cast<void*>(fd) == filter_ptr) return fd;
+		}
+	}
+	return s_active_filters.front();
+}
+
+std::vector<ActiveFilterItem> get_active_filter_list() {
+	std::lock_guard<std::mutex> lock(s_filters_mutex);
+	std::vector<ActiveFilterItem> list;
+	for (ai_filter_data *fd : s_active_filters) {
+		if (!fd) continue;
+		ActiveFilterItem item;
+		item.filter_ptr = static_cast<void*>(fd);
+		std::string name;
+		if (fd->context) {
+			obs_source_t *parent = obs_filter_get_parent(fd->context);
+			const char *pname = parent ? obs_source_get_name(parent) : nullptr;
+			const char *fname = obs_source_get_name(fd->context);
+			if (pname && pname[0] != '\0') {
+				name = std::string(pname);
+				if (fname && strcmp(fname, "Traductor IA") != 0 && fname[0] != '\0') {
+					name += " (" + std::string(fname) + ")";
+				}
+			} else if (fname && fname[0] != '\0') {
+				name = fname;
+			}
+		}
+		if (name.empty()) {
+			name = "Micrófono " + std::to_string(list.size() + 1);
+		}
+		item.display_name = name;
+		list.push_back(item);
+	}
+	return list;
+}
+
+FilterStatusInfo get_active_filter_status(void *filter_ptr) {
 	FilterStatusInfo info;
 	std::lock_guard<std::mutex> lock(s_filters_mutex);
-	if (s_active_filters.empty() || !s_active_filters.front()) {
+	ai_filter_data* fd = get_filter_locked(filter_ptr);
+	if (!fd) {
 		info.has_active_filter = false;
 		return info;
 	}
 
-	ai_filter_data* fd = s_active_filters.front();
 	info.has_active_filter = true;
+	info.filter_ptr = static_cast<void*>(fd);
 	info.is_remote = fd->use_remote_transcription;
 	{
 		std::lock_guard<std::mutex> slock(fd->status_mutex);
@@ -555,37 +596,48 @@ FilterStatusInfo get_active_filter_status() {
 	return info;
 }
 
-void trigger_active_filter_reconnect() {
+void trigger_active_filter_reconnect(void *filter_ptr) {
 	std::lock_guard<std::mutex> lock(s_filters_mutex);
-	if (!s_active_filters.empty() && s_active_filters.front()) {
-		ai_filter_data* fd = s_active_filters.front();
-		if (fd->use_remote_transcription && fd->remote_client) {
-			blog(LOG_INFO, "[AI Translator] Triggering manual reconnect from UI...");
-			std::string full_url = build_full_ws_url(fd->ws_url, fd->ws_token,
-			                                         fd->current_language, fd->target_language, "true");
-			{
-				std::lock_guard<std::mutex> slock(fd->status_mutex);
-				fd->connection_status = "🟡 Conectando...";
-			}
-			fd->remote_client->update_url(full_url);
+	ai_filter_data* fd = get_filter_locked(filter_ptr);
+	if (fd && fd->use_remote_transcription && fd->remote_client) {
+		blog(LOG_INFO, "[AI Translator] Triggering manual reconnect from UI...");
+		std::string full_url = build_full_ws_url(fd->ws_url, fd->ws_token,
+		                                         fd->current_language, fd->target_language, "true");
+		{
+			std::lock_guard<std::mutex> slock(fd->status_mutex);
+			fd->connection_status = "🟡 Conectando...";
 		}
+		fd->remote_client->update_url(full_url);
 	}
 }
 
-void toggle_active_filter_pause() {
+void toggle_active_filter_pause(void *filter_ptr) {
 	std::lock_guard<std::mutex> lock(s_filters_mutex);
-	if (!s_active_filters.empty() && s_active_filters.front()) {
-		ai_filter_data* fd = s_active_filters.front();
+	ai_filter_data* fd = get_filter_locked(filter_ptr);
+	if (fd) {
 		bool current = fd->is_paused.load();
 		fd->is_paused.store(!current);
 		blog(LOG_INFO, "[AI Translator] Filter translation %s from UI", !current ? "PAUSED" : "RESUMED");
 	}
 }
 
-obs_source_t* get_active_filter_source() {
+void clear_active_filter_subtitles(void *filter_ptr) {
 	std::lock_guard<std::mutex> lock(s_filters_mutex);
-	if (!s_active_filters.empty() && s_active_filters.front()) {
-		return s_active_filters.front()->context;
+	ai_filter_data* fd = get_filter_locked(filter_ptr);
+	if (fd) {
+		blog(LOG_INFO, "[AI Translator] Clearing active subtitles from UI...");
+		if (fd->animator) {
+			fd->animator->clear();
+		}
+		update_subtitle_source(fd, "", true, (size_t)-1);
+	}
+}
+
+obs_source_t* get_active_filter_source(void *filter_ptr) {
+	std::lock_guard<std::mutex> lock(s_filters_mutex);
+	ai_filter_data* fd = get_filter_locked(filter_ptr);
+	if (fd) {
+		return fd->context;
 	}
 	return nullptr;
 }

@@ -18,6 +18,7 @@ TranslatorDock::TranslatorDock(QWidget *parent)
 {
     setupUi();
 
+    refreshFilterList();
     refreshSourceList();
     loadSettingsFromFilter();
 
@@ -72,12 +73,33 @@ void TranslatorDock::setupUi()
     m_lblWarning->setVisible(false);
     layout->addWidget(m_lblWarning);
 
-    // ── 1. Top Card: Master Status & Fixed-Width Controls (Zero Jitter) ─────
+    // ── 0. Group: Active Filter / Mic Selector ──────────────────────────────
+    m_grpFilterSelector = new QGroupBox("Micrófono / Entrada de Audio", container);
+    m_grpFilterSelector->setStyleSheet(groupStyle);
+    QHBoxLayout *filterRow = new QHBoxLayout(m_grpFilterSelector);
+    filterRow->setContentsMargins(8, 8, 8, 8);
+    filterRow->setSpacing(6);
+
+    m_cmbActiveFilter = new QComboBox(m_grpFilterSelector);
+    m_cmbActiveFilter->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    connect(m_cmbActiveFilter, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &TranslatorDock::onActiveFilterChanged);
+    filterRow->addWidget(m_cmbActiveFilter);
+
+    m_btnRefreshFilters = new QPushButton(m_grpFilterSelector);
+    m_btnRefreshFilters->setIcon(VectorIcons::iconRefresh(QColor("#b0b0b0"), 14));
+    m_btnRefreshFilters->setToolTip("Actualizar lista de micrófonos con filtro");
+    m_btnRefreshFilters->setFixedWidth(30);
+    connect(m_btnRefreshFilters, &QPushButton::clicked, this, &TranslatorDock::refreshFilterList);
+    filterRow->addWidget(m_btnRefreshFilters);
+
+    layout->addWidget(m_grpFilterSelector);
+
+    // ── 1. Top Card: Master Status & Quick Actions ──────────────────────────
     QFrame *cardTop = new QFrame(container);
     cardTop->setStyleSheet("QFrame { background-color: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.07); border-radius: 5px; }");
     QHBoxLayout *topLayout = new QHBoxLayout(cardTop);
     topLayout->setContentsMargins(10, 6, 10, 6);
-    topLayout->setSpacing(8);
+    topLayout->setSpacing(6);
 
     m_lblVadIcon = new QLabel(cardTop);
     m_lblVadIcon->setFixedSize(18, 18);
@@ -86,15 +108,25 @@ void TranslatorDock::setupUi()
 
     m_lblVadText = new QLabel("Silencio", cardTop);
     m_lblVadText->setStyleSheet("font-size: 9pt; font-weight: 600; color: #8c8c8c;");
-    m_lblVadText->setMinimumWidth(80);
+    m_lblVadText->setMinimumWidth(75);
     topLayout->addWidget(m_lblVadText);
 
     topLayout->addStretch();
 
+    // Quick Clear Button (Panic Button)
+    m_btnClear = new QPushButton("Limpiar", cardTop);
+    m_btnClear->setIcon(VectorIcons::iconClear(QColor("#e0e0e0"), 14));
+    m_btnClear->setToolTip("Limpiar subtítulos en pantalla de inmediato");
+    m_btnClear->setFixedWidth(80);
+    m_btnClear->setStyleSheet("QPushButton { padding: 4px 8px; font-weight: 600; border-radius: 4px; }");
+    connect(m_btnClear, &QPushButton::clicked, this, &TranslatorDock::onClearSubtitles);
+    topLayout->addWidget(m_btnClear);
+
+    // Pause / Resume Button
     m_btnPause = new QPushButton("Pausar", cardTop);
     m_btnPause->setIcon(VectorIcons::iconPause(QColor("#e0e0e0"), 14));
-    m_btnPause->setFixedWidth(95);
-    m_btnPause->setStyleSheet("QPushButton { padding: 4px 10px; font-weight: 600; border-radius: 4px; }");
+    m_btnPause->setFixedWidth(85);
+    m_btnPause->setStyleSheet("QPushButton { padding: 4px 8px; font-weight: 600; border-radius: 4px; }");
     connect(m_btnPause, &QPushButton::clicked, this, &TranslatorDock::onTogglePause);
     topLayout->addWidget(m_btnPause);
 
@@ -276,6 +308,51 @@ void TranslatorDock::setupUi()
     rootLayout->addWidget(scrollArea);
 }
 
+void TranslatorDock::refreshFilterList()
+{
+    m_isUpdatingUi = true;
+    auto filters = get_active_filter_list();
+
+    void *previousSelection = m_selectedFilterPtr;
+    m_cmbActiveFilter->clear();
+
+    int selectedIndex = -1;
+    for (int i = 0; i < (int)filters.size(); ++i) {
+        m_cmbActiveFilter->addItem(QString::fromUtf8(filters[i].display_name.c_str()),
+                                   QVariant::fromValue(reinterpret_cast<quintptr>(filters[i].filter_ptr)));
+        if (filters[i].filter_ptr == previousSelection) {
+            selectedIndex = i;
+        }
+    }
+
+    if (filters.empty()) {
+        m_selectedFilterPtr = nullptr;
+        m_grpFilterSelector->setVisible(false);
+    } else {
+        m_grpFilterSelector->setVisible(true);
+        if (selectedIndex >= 0) {
+            m_cmbActiveFilter->setCurrentIndex(selectedIndex);
+            m_selectedFilterPtr = previousSelection;
+        } else {
+            m_cmbActiveFilter->setCurrentIndex(0);
+            m_selectedFilterPtr = filters[0].filter_ptr;
+        }
+    }
+
+    m_isUpdatingUi = false;
+}
+
+void TranslatorDock::onActiveFilterChanged(int index)
+{
+    if (m_isUpdatingUi) return;
+    if (index >= 0) {
+        quintptr ptrVal = m_cmbActiveFilter->itemData(index).value<quintptr>();
+        m_selectedFilterPtr = reinterpret_cast<void*>(ptrVal);
+        loadSettingsFromFilter();
+        refreshStatus();
+    }
+}
+
 void TranslatorDock::refreshSourceList()
 {
     m_isUpdatingUi = true;
@@ -303,7 +380,7 @@ void TranslatorDock::refreshSourceList()
     if (idx >= 0) {
         m_cmbTargetSource->setCurrentIndex(idx);
     } else {
-        obs_source_t *source = get_active_filter_source();
+        obs_source_t *source = get_active_filter_source(m_selectedFilterPtr);
         if (source) {
             obs_data_t *settings = obs_source_get_settings(source);
             if (settings) {
@@ -321,7 +398,7 @@ void TranslatorDock::refreshSourceList()
 
 void TranslatorDock::loadSettingsFromFilter()
 {
-    obs_source_t *source = get_active_filter_source();
+    obs_source_t *source = get_active_filter_source(m_selectedFilterPtr);
     if (!source) return;
 
     obs_data_t *settings = obs_source_get_settings(source);
@@ -377,7 +454,7 @@ void TranslatorDock::loadSettingsFromFilter()
 void TranslatorDock::saveSettingString(const char *key, const QString &val)
 {
     if (m_isUpdatingUi) return;
-    obs_source_t *source = get_active_filter_source();
+    obs_source_t *source = get_active_filter_source(m_selectedFilterPtr);
     if (!source) return;
 
     obs_data_t *settings = obs_source_get_settings(source);
@@ -391,7 +468,7 @@ void TranslatorDock::saveSettingString(const char *key, const QString &val)
 void TranslatorDock::saveSettingBool(const char *key, bool val)
 {
     if (m_isUpdatingUi) return;
-    obs_source_t *source = get_active_filter_source();
+    obs_source_t *source = get_active_filter_source(m_selectedFilterPtr);
     if (!source) return;
 
     obs_data_t *settings = obs_source_get_settings(source);
@@ -468,7 +545,7 @@ void TranslatorDock::onWsUrlEditingFinished()
 
 void TranslatorDock::refreshStatus()
 {
-    FilterStatusInfo info = get_active_filter_status();
+    FilterStatusInfo info = get_active_filter_status(m_selectedFilterPtr);
 
     bool filterSourceChanged = (!m_lastHadActiveFilter && info.has_active_filter) ||
                                (m_lastActiveSource != info.source_context);
@@ -477,19 +554,24 @@ void TranslatorDock::refreshStatus()
 
     if (!info.has_active_filter) {
         m_lblWarning->setVisible(true);
+        m_grpFilterSelector->setVisible(false);
         m_lblVadIcon->setPixmap(VectorIcons::iconMic(QColor("#7f8c8d"), 18).pixmap(18, 18));
         m_lblVadText->setText("Inactivo");
         m_lblVadText->setStyleSheet("color: #7f8c8d; font-size: 9pt; font-weight: 600;");
         m_btnPause->setEnabled(false);
+        m_btnClear->setEnabled(false);
         return;
     }
 
     if (filterSourceChanged) {
+        refreshFilterList();
         loadSettingsFromFilter();
     }
 
     m_lblWarning->setVisible(false);
+    m_grpFilterSelector->setVisible(true);
     m_btnPause->setEnabled(true);
+    m_btnClear->setEnabled(true);
 
     // VAD Status & Pause State
     if (info.is_paused) {
@@ -532,14 +614,19 @@ void TranslatorDock::refreshStatus()
 
 void TranslatorDock::onTogglePause()
 {
-    toggle_active_filter_pause();
+    toggle_active_filter_pause(m_selectedFilterPtr);
     refreshStatus();
+}
+
+void TranslatorDock::onClearSubtitles()
+{
+    clear_active_filter_subtitles(m_selectedFilterPtr);
 }
 
 void TranslatorDock::onReconnect()
 {
     saveSettingString("ws_url", m_txtWsUrl->text().trimmed());
-    trigger_active_filter_reconnect();
+    trigger_active_filter_reconnect(m_selectedFilterPtr);
     refreshStatus();
 }
 

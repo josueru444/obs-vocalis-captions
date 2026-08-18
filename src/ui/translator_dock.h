@@ -23,8 +23,11 @@ public:
 
 private slots:
     void refreshStatus();
+    void refreshFilterList();
     void refreshSourceList();
+    void onActiveFilterChanged(int index);
     void onTogglePause();
+    void onClearSubtitles();
     void onReconnect();
     void onOpenSettings();
     void onBrowseCustomModel();
@@ -46,23 +49,33 @@ private:
     void saveSettingBool(const char *key, bool val);
 
     bool m_isUpdatingUi{false};
+    void *m_selectedFilterPtr{nullptr};
     void *m_lastActiveSource{nullptr};
     bool m_lastHadActiveFilter{false};
 
-    // Header & VAD
+    // Warning
+    QLabel *m_lblWarning{nullptr};
+
+    // 0. Active Filter / Mic Selector
+    QGroupBox *m_grpFilterSelector{nullptr};
+    QComboBox *m_cmbActiveFilter{nullptr};
+    QPushButton *m_btnRefreshFilters{nullptr};
+
+    // 1. Header & Quick Actions
     QLabel *m_lblVadIcon{nullptr};
     QLabel *m_lblVadText{nullptr};
+    QPushButton *m_btnClear{nullptr};
     QPushButton *m_btnPause{nullptr};
 
-    // Target Subtitle Source
+    // 2. Target Subtitle Source
     QComboBox *m_cmbTargetSource{nullptr};
     QPushButton *m_btnRefreshSources{nullptr};
 
-    // Languages
+    // 3. Languages
     QComboBox *m_cmbLangIn{nullptr};
     QComboBox *m_cmbLangOut{nullptr};
 
-    // Engine Mode
+    // 4. Engine Mode
     QComboBox *m_cmbEngineMode{nullptr};
 
     // Remote settings container
@@ -81,10 +94,7 @@ private:
     QPushButton *m_btnBrowseModel{nullptr};
     QCheckBox *m_chkGpu{nullptr};
 
-    // Warning
-    QLabel *m_lblWarning{nullptr};
-
-    // Bottom
+    // 5. Bottom
     QPushButton *m_btnSettings{nullptr};
 
     QTimer *m_updateTimer{nullptr};
