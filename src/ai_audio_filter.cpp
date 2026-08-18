@@ -593,6 +593,12 @@ FilterStatusInfo get_active_filter_status(void *filter_ptr) {
 	info.target_lang = fd->target_language.empty() ? "en" : fd->target_language;
 	info.is_paused = fd->is_paused.load();
 	info.source_context = fd->context;
+	if (fd->context) {
+		obs_source_t *parent = obs_filter_get_parent(fd->context);
+		if (parent) {
+			info.is_muted = obs_source_muted(parent) || !obs_source_active(parent);
+		}
+	}
 	return info;
 }
 
@@ -782,26 +788,30 @@ obs_properties_t *ai_filter_get_properties(void *data)
 
 	obs_properties_add_int(props, "auto_clear_seconds", "Ocultar tras X segundos de silencio (0=nunca):", 0, 30, 1);
 
-	// ── Group 4: Visualización Avanzada (Flicker) ─────────────────────────────
+	// ── Group 4: Visualización Avanzada y Muestreo ────────────────────────────
 	obs_properties_t *group_partial = obs_properties_create();
 
 	obs_property_t *combo_partial =
 		obs_properties_add_list(group_partial, "partial_mode",
 		                        "Modo de actualización del texto:",
 		                        OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
-	obs_property_list_add_string(combo_partial, "Tiempo real  —  texto actualiza cada 0.5 segundos", "realtime");
-	obs_property_list_add_string(combo_partial, "Balanceado  —  texto actualiza cada 1.0 segundos", "balanced");
+	obs_property_list_add_string(combo_partial, "Tiempo real  —  0.5 segundos (Fluidez continua)", "realtime");
+	obs_property_list_add_string(combo_partial, "Balanceado   —  1.0 segundos (Recomendado)", "balanced");
+	obs_property_list_add_string(combo_partial, "Alta Precisión —  2.0 segundos (Frases completas)", "precision");
+	obs_property_list_add_string(combo_partial, "Personalizado  —  Configurar milisegundos exactos", "custom");
+
+	obs_properties_add_int_slider(group_partial, "custom_partial_interval_ms",
+	                              "Intervalo personalizado (ms):", 200, 5000, 50);
 
 	obs_properties_add_text(
 		group_partial, "partial_mode_help",
 		"Tiempo real (0.5s): Fluidez inmediata sin pausas.\n"
-		"   El texto fluye continuamente en pantalla mientras hablas.\n"
-		"\n"
 		"Balanceado (1.0s): Buen equilibrio entre velocidad y estabilidad.\n"
-		"   Recomendado si quieres darle a la IA más tiempo para pensar frases.",
+		"Alta Precisión (2.0s): Espera más audio para mayor contexto y precisión.\n"
+		"Personalizado: Permite ajustar libremente los milisegundos de muestreo.",
 		OBS_TEXT_INFO);
 
-	obs_properties_add_group(props, "grp_partial", "4. Visualización Avanzada (Flicker)",
+	obs_properties_add_group(props, "grp_partial", "4. Visualización y Muestreo de Subtítulos",
 	                         OBS_GROUP_NORMAL, group_partial);
 
 	// ── Group 5: Advanced Options ─────────────────────────────────────────────
@@ -847,10 +857,18 @@ static void ai_filter_update(void *data, obs_data_t *settings)
 	// Map partial_mode string -> interval in ms (0 = finals only)
 	{
 		const char *mode = obs_data_get_string(settings, "partial_mode");
-		if (mode && strcmp(mode, "balanced") == 0)
-			fd->partial_send_interval_ms = 1000;
-		else // "realtime" or default
+		int custom_ms = (int)obs_data_get_int(settings, "custom_partial_interval_ms");
+		if (custom_ms < 200) custom_ms = 1000;
+
+		if (mode && strcmp(mode, "realtime") == 0)
 			fd->partial_send_interval_ms = 500;
+		else if (mode && strcmp(mode, "precision") == 0)
+			fd->partial_send_interval_ms = 2000;
+		else if (mode && strcmp(mode, "custom") == 0)
+			fd->partial_send_interval_ms = (size_t)custom_ms;
+		else // "balanced" or default
+			fd->partial_send_interval_ms = 1000;
+
 		fd->partial_mode = mode ? mode : "balanced";
 	}
 
@@ -1197,6 +1215,7 @@ static void ai_filter_get_defaults(obs_data_t *settings)
 	obs_data_set_default_int(settings, "auto_clear_seconds", 5);
 	obs_data_set_default_int(settings, "max_lines", 2);
 	obs_data_set_default_string(settings, "partial_mode", "balanced");
+	obs_data_set_default_int(settings, "custom_partial_interval_ms", 1500);
 	obs_data_set_default_double(settings, "vad_rms", 0.003);
 	obs_data_set_default_int(settings, "vad_min_speech", 200);
 	obs_data_set_default_int(settings, "vad_hangover", 800);
@@ -1268,8 +1287,15 @@ static struct obs_audio_data *ai_filter_audio(void *data, struct obs_audio_data 
 
 		if (filter_data->was_skipping != should_skip) {
 			blog(LOG_INFO, "[AI Translator] Audio processing %s (muted=%d, active=%d)", 
-				should_skip ? "PAUSED" : "RESUMED", is_muted, is_active);
+				should_skip ? "PAUSED (Muted/Inactive)" : "RESUMED", is_muted, is_active);
 			filter_data->was_skipping = should_skip;
+			if (should_skip) {
+				filter_data->vad.speaking = false;
+				filter_data->vad.speech_ms = 0;
+				filter_data->vad.silence_ms = 0;
+				if (filter_data->vad_ctx)
+					whisper_vad_reset_state(filter_data->vad_ctx);
+			}
 		}
 
 		if (should_skip || filter_data->is_paused.load()) {

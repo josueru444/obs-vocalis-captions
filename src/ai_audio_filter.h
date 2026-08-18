@@ -21,6 +21,7 @@ struct FilterStatusInfo {
 	std::string input_lang{"es"};
 	std::string target_lang{"en"};
 	bool is_paused{false};
+	bool is_muted{false};
 	obs_source_t *source_context{nullptr};
 	void *filter_ptr{nullptr};
 };

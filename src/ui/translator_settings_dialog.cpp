@@ -41,9 +41,24 @@ void TranslatorSettingsDialog::setupUi()
     formRemote->addRow("Token / Clave de Acceso:", m_txtWsToken);
 
     m_cmbPartialMode = new QComboBox(this);
-    m_cmbPartialMode->addItem("Tiempo Real (0.5s - Fluidez continua)", "realtime");
-    m_cmbPartialMode->addItem("Balanceado (1.0s - Mayor estabilidad)", "balanced");
-    formRemote->addRow("Modo de Envío:", m_cmbPartialMode);
+    m_cmbPartialMode->addItem("Tiempo Real (500 ms - Fluidez continua)", "realtime");
+    m_cmbPartialMode->addItem("Balanceado (1000 ms - Recomendado)", "balanced");
+    m_cmbPartialMode->addItem("Alta Precisión (2000 ms - Frases completas)", "precision");
+    m_cmbPartialMode->addItem("Personalizado (Elegir milisegundos)", "custom");
+    connect(m_cmbPartialMode, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &TranslatorSettingsDialog::onPartialModeChanged);
+    formRemote->addRow("Muestreo de Texto:", m_cmbPartialMode);
+
+    m_widgetCustomInterval = new QWidget(this);
+    QHBoxLayout *customIntervalLayout = new QHBoxLayout(m_widgetCustomInterval);
+    customIntervalLayout->setContentsMargins(0, 0, 0, 0);
+    m_spnCustomInterval = new QSpinBox(m_widgetCustomInterval);
+    m_spnCustomInterval->setRange(200, 5000);
+    m_spnCustomInterval->setSingleStep(50);
+    m_spnCustomInterval->setValue(1500);
+    m_spnCustomInterval->setSuffix(" ms");
+    customIntervalLayout->addWidget(m_spnCustomInterval);
+    m_widgetCustomInterval->setVisible(false);
+    formRemote->addRow("Intervalo Exacto:", m_widgetCustomInterval);
 
     remoteLayout->addWidget(grpRemoteConfig);
     remoteLayout->addStretch();
@@ -208,6 +223,12 @@ void TranslatorSettingsDialog::onRemoteModeToggled(bool checked)
     m_tabWidget->setTabEnabled(1, true);
 }
 
+void TranslatorSettingsDialog::onPartialModeChanged(int index)
+{
+    bool isCustom = (m_cmbPartialMode->itemData(index).toString() == "custom");
+    m_widgetCustomInterval->setVisible(isCustom);
+}
+
 void TranslatorSettingsDialog::loadCurrentSettings()
 {
     obs_source_t *source = get_active_filter_source();
@@ -221,8 +242,15 @@ void TranslatorSettingsDialog::loadCurrentSettings()
     m_txtWsToken->setText(obs_data_get_string(settings, "ws_token"));
 
     const char *mode = obs_data_get_string(settings, "partial_mode");
-    int mode_idx = m_cmbPartialMode->findData(mode ? mode : "realtime");
+    int mode_idx = m_cmbPartialMode->findData(mode ? mode : "balanced");
     if (mode_idx >= 0) m_cmbPartialMode->setCurrentIndex(mode_idx);
+
+    int custom_ms = (int)obs_data_get_int(settings, "custom_partial_interval_ms");
+    if (custom_ms >= 200) m_spnCustomInterval->setValue(custom_ms);
+    else m_spnCustomInterval->setValue(1500);
+
+    bool isCustom = (m_cmbPartialMode->currentData().toString() == "custom");
+    m_widgetCustomInterval->setVisible(isCustom);
 
     const char *model = obs_data_get_string(settings, "model_settings");
     int model_idx = m_cmbModel->findData(model ? model : "ggml-base.bin");
@@ -270,6 +298,7 @@ void TranslatorSettingsDialog::saveSettings()
     obs_data_set_string(settings, "ws_url", m_txtWsUrl->text().trimmed().toUtf8().constData());
     obs_data_set_string(settings, "ws_token", m_txtWsToken->text().trimmed().toUtf8().constData());
     obs_data_set_string(settings, "partial_mode", m_cmbPartialMode->currentData().toString().toUtf8().constData());
+    obs_data_set_int(settings, "custom_partial_interval_ms", m_spnCustomInterval->value());
 
     obs_data_set_string(settings, "model_settings", m_cmbModel->currentData().toString().toUtf8().constData());
     obs_data_set_bool(settings, "use_custom_model", m_chkUseCustomModel->isChecked());

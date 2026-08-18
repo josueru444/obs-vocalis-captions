@@ -573,8 +573,12 @@ void TranslatorDock::refreshStatus()
     m_btnPause->setEnabled(true);
     m_btnClear->setEnabled(true);
 
-    // VAD Status & Pause State
-    if (info.is_paused) {
+    // VAD Status, Mute & Pause State
+    if (info.is_muted) {
+        m_lblVadIcon->setPixmap(VectorIcons::iconMicMuted(QColor("#d4883b"), 18).pixmap(18, 18));
+        m_lblVadText->setText("Muteado (OBS)");
+        m_lblVadText->setStyleSheet("color: #d4883b; font-size: 9pt; font-weight: 600;");
+    } else if (info.is_paused) {
         m_lblVadIcon->setPixmap(VectorIcons::iconPause(QColor("#d4883b"), 18).pixmap(18, 18));
         m_lblVadText->setText("En pausa");
         m_lblVadText->setStyleSheet("color: #d4883b; font-size: 9pt; font-weight: 600;");

@@ -21,18 +21,27 @@ static void apply_text_color(obs_data_t *settings, long long color)
 	obs_data_set_int(settings, "color", color);
 }
 
+enum class SubtitleAnimState {
+	ANIM_IDLE,
+	ANIM_FADE_IN,
+	ANIM_VISIBLE,
+	ANIM_FADE_OUT
+};
+
 struct MyCaptionsFont {
 	obs_source_t *text_font;
 	obs_source_t *color_font;
 	obs_source_t *lang_font;
 
 	long long cached_bg_color{-1};
+	long long last_rendered_bg_color{-1};
 	
 	std::string cached_raw_text;
 	std::string cached_text;
 	std::string cached_lang_code;
 
 	// Animation state
+	SubtitleAnimState anim_state{SubtitleAnimState::ANIM_IDLE};
 	uint64_t anim_start_time{0};
 	float prev_bg_width{0.0f};
 	float prev_bg_height{0.0f};
@@ -54,6 +63,7 @@ struct MyCaptionsFont {
 	bool cached_fixed_bg_width{false};
 	long cached_custom_width{-1};
 	bool cached_bottom_align{false};
+	std::string cached_align{"left"};
 	int cached_max_lines{-1};
 	// Partial/Final color state
 	bool cached_is_partial{false};
@@ -84,6 +94,7 @@ static void *my_font_create(obs_data_t *settings, obs_source_t *source)
 	data->cached_fixed_bg_width = false;
 	data->cached_custom_width = 900;
 	data->cached_bottom_align = false;
+	data->cached_align = "left";
 	data->cached_max_lines = 3;
 
 	obs_data_t *text_defaults = obs_data_create();
@@ -98,6 +109,7 @@ static void *my_font_create(obs_data_t *settings, obs_source_t *source)
 	obs_data_set_bool(text_defaults, "word_wrap", true);
 	obs_data_set_int(text_defaults, "custom_width", 900);
 	obs_data_set_int(text_defaults, "cx", 900);
+	obs_data_set_string(text_defaults, "align", "left");
 
 	obs_data_t *font_obj = obs_data_create();
 	obs_data_set_string(font_obj, "face", "Arial");
@@ -174,6 +186,10 @@ static void my_font_render(void *data, gs_effect_t *effect)
 	(void)effect;
 	MyCaptionsFont *ctx = (MyCaptionsFont *)data;
 
+	if (ctx->anim_state == SubtitleAnimState::ANIM_IDLE || ctx->displayed_text.empty()) {
+		return;
+	}
+
 	uint32_t cx = obs_source_get_width(ctx->text_font);
 	uint32_t cy = obs_source_get_height(ctx->text_font);
 	uint32_t lang_cy = ctx->cached_lang_code.empty() ? 0 : obs_source_get_height(ctx->lang_font);
@@ -185,30 +201,100 @@ static void my_font_render(void *data, gs_effect_t *effect)
 	float max_height = ctx->cached_max_lines * estimated_line_height + 20.0f + (float)lang_cy;
 	float bg_height = ctx->cached_bottom_align ? max_height : (float)(cy + 20 + lang_cy);
 
-	// Animation Progress Calculation
+	// Animation Progress Calculation (350ms smooth cinematic ease-out)
 	uint64_t now = os_gettime_ns();
 	float anim_progress = 1.0f;
-	float anim_duration_ns = 250000000.0f; // 250ms
+	float anim_duration_ns = 350000000.0f; // 350ms
 	
-	if (ctx->anim_start_time > 0 && now - ctx->anim_start_time < (uint64_t)anim_duration_ns) {
-		anim_progress = (float)(now - ctx->anim_start_time) / anim_duration_ns;
+	if (ctx->anim_state != SubtitleAnimState::ANIM_FADE_OUT && ctx->anim_start_time > 0 && now - ctx->anim_start_time < (uint64_t)anim_duration_ns) {
+		float t = (float)(now - ctx->anim_start_time) / anim_duration_ns;
 		// Cubic ease-out
-		anim_progress = 1.0f - std::pow(1.0f - anim_progress, 3.0f);
+		anim_progress = 1.0f - std::pow(1.0f - t, 3.0f);
 	}
 
 	// Morph background dimensions
-	if (bg_width != ctx->current_bg_width || bg_height != ctx->current_bg_height) {
-		// If target changed completely and we finished previous animation, just jump. 
-		// If it just changed, the previous dimensions are already stored by update.
-		ctx->current_bg_width = bg_width;
-		ctx->current_bg_height = bg_height;
+	if (ctx->anim_state != SubtitleAnimState::ANIM_FADE_OUT) {
+		if (bg_width != ctx->current_bg_width || bg_height != ctx->current_bg_height) {
+			ctx->current_bg_width = bg_width;
+			ctx->current_bg_height = bg_height;
+		}
 	}
 	
 	float animated_bg_width = ctx->prev_bg_width + (bg_width - ctx->prev_bg_width) * anim_progress;
 	float animated_bg_height = ctx->prev_bg_height + (bg_height - ctx->prev_bg_height) * anim_progress;
-	if (ctx->prev_bg_width == 0.0f) animated_bg_width = bg_width;
-	if (ctx->prev_bg_height == 0.0f) animated_bg_height = bg_height;
+	if (ctx->prev_bg_width == 0.0f || ctx->anim_state == SubtitleAnimState::ANIM_FADE_OUT) {
+		animated_bg_width = bg_width;
+		animated_bg_height = bg_height;
+	}
 
+	// Dynamic Motion: Slide-up (28px) and Scale-in (88% -> 100%)
+	float anim_y_offset = 0.0f;
+	float anim_scale = 1.0f;
+
+	if (ctx->is_new_sentence_anim && ctx->anim_state == SubtitleAnimState::ANIM_FADE_IN && anim_progress < 1.0f) {
+		anim_y_offset = 28.0f * (1.0f - anim_progress);
+		anim_scale = 0.88f + (0.12f * anim_progress);
+	} else if (ctx->anim_state == SubtitleAnimState::ANIM_FADE_OUT) {
+		uint64_t elapsed = now - ctx->anim_start_time;
+		float t_out = (float)elapsed / 350000000.0f;
+		if (t_out > 1.0f) t_out = 1.0f;
+		anim_y_offset = -6.0f * t_out; // subtle float up as it fades out
+	}
+
+	// Horizontal Alignment Offset Calculation
+	float text_cx = (float)cx;
+	float text_offset_x = 10.0f;
+	if (ctx->cached_align == "center") {
+		if (animated_bg_width > text_cx + 20.0f) {
+			text_offset_x = (animated_bg_width - text_cx) / 2.0f;
+		}
+	} else if (ctx->cached_align == "right") {
+		if (animated_bg_width > text_cx + 20.0f) {
+			text_offset_x = animated_bg_width - text_cx - 10.0f;
+		}
+	}
+
+	float lang_offset_x = 10.0f;
+	if (!ctx->cached_lang_code.empty() && lang_cy > 0) {
+		uint32_t lang_cx = obs_source_get_width(ctx->lang_font);
+		if (ctx->cached_align == "center") {
+			if (animated_bg_width > (float)lang_cx + 20.0f) {
+				lang_offset_x = (animated_bg_width - (float)lang_cx) / 2.0f;
+			}
+		} else if (ctx->cached_align == "right") {
+			if (animated_bg_width > (float)lang_cx + 20.0f) {
+				lang_offset_x = animated_bg_width - (float)lang_cx - 10.0f;
+			}
+		}
+	}
+
+	// ROOT MATRIX: Transform the whole subtitle card (Background + Badge + Text) as a single unified unit
+	gs_matrix_push();
+
+	// 1. Translate vertically (Slide-up float)
+	struct vec3 v_root_trans;
+	vec3_set(&v_root_trans, 0.0f, anim_y_offset, 0.0f);
+	gs_matrix_translate(&v_root_trans);
+
+	// 2. Scale around center of the card
+	if (anim_scale < 0.999f) {
+		float center_x = animated_bg_width * 0.5f;
+		float center_y = animated_bg_height * 0.5f;
+
+		struct vec3 v_center_fwd;
+		vec3_set(&v_center_fwd, center_x, center_y, 0.0f);
+		gs_matrix_translate(&v_center_fwd);
+
+		struct vec3 v_s;
+		vec3_set(&v_s, anim_scale, anim_scale, 1.0f);
+		gs_matrix_scale(&v_s);
+
+		struct vec3 v_center_back;
+		vec3_set(&v_center_back, -center_x, -center_y, 0.0f);
+		gs_matrix_translate(&v_center_back);
+	}
+
+	// 3. Render Background Card
 	if (animated_bg_width > 0 && animated_bg_height > 0) {
 		gs_matrix_push();
 		struct vec3 scale;
@@ -218,38 +304,31 @@ static void my_font_render(void *data, gs_effect_t *effect)
 		gs_matrix_pop();
 	}
 
-	// Y Slide-up Offset Animation
-	float anim_y_offset = 0.0f;
-	if (ctx->is_new_sentence_anim && anim_progress < 1.0f) {
-		anim_y_offset = 15.0f * (1.0f - anim_progress);
-	}
-
+	// 4. Render Language Badge
 	if (!ctx->cached_lang_code.empty() && lang_cy > 0) {
 		gs_matrix_push();
 		struct vec3 offset_lang;
-		vec3_set(&offset_lang, 10.0f, 10.0f + anim_y_offset, 0.0f);
+		vec3_set(&offset_lang, lang_offset_x, 10.0f, 0.0f);
 		gs_matrix_translate(&offset_lang);
 		obs_source_video_render(ctx->lang_font);
 		gs_matrix_pop();
 	}
 
+	// 5. Render Text
 	gs_matrix_push();
 	struct vec3 offset;
-	
 	if (ctx->cached_bottom_align) {
-		// Align text to the BOTTOM of the fixed background instead of centering
 		float y_offset = max_height - (float)cy - 10.0f;
 		if (y_offset < 10.0f + (float)lang_cy) y_offset = 10.0f + (float)lang_cy;
-		
-		vec3_set(&offset, 10.0f, y_offset + anim_y_offset, 0.0f);
+		vec3_set(&offset, text_offset_x, y_offset, 0.0f);
 	} else {
-		vec3_set(&offset, 10.0f, 10.0f + (float)lang_cy + anim_y_offset, 0.0f);
+		vec3_set(&offset, text_offset_x, 10.0f + (float)lang_cy, 0.0f);
 	}
-	
 	gs_matrix_translate(&offset);
-
 	obs_source_video_render(ctx->text_font);
+	gs_matrix_pop();
 
+	// Pop Root Matrix
 	gs_matrix_pop();
 }
 
@@ -257,6 +336,8 @@ static void my_font_render(void *data, gs_effect_t *effect)
 static uint32_t my_font_get_width(void *data)
 {
 	MyCaptionsFont *ctx = (MyCaptionsFont *)data;
+	if (ctx->anim_state == SubtitleAnimState::ANIM_IDLE || ctx->displayed_text.empty())
+		return 0;
 	if (ctx->cached_fixed_bg_width)
 		return ctx->cached_custom_width;
 	return obs_source_get_width(ctx->text_font) + 20;
@@ -265,6 +346,8 @@ static uint32_t my_font_get_width(void *data)
 static uint32_t my_font_get_height(void *data)
 {
 	MyCaptionsFont *ctx = (MyCaptionsFont *)data;
+	if (ctx->anim_state == SubtitleAnimState::ANIM_IDLE || ctx->displayed_text.empty())
+		return 0;
 	uint32_t lang_cy = ctx->cached_lang_code.empty() ? 0 : obs_source_get_height(ctx->lang_font);
 	if (ctx->cached_bottom_align) {
 		float estimated_line_height = (float)ctx->cached_font_size * 1.4f;
@@ -288,16 +371,163 @@ static bool on_word_wrap_changed(obs_properties_t *props, obs_property_t *p, obs
 	return true;
 }
 
+static bool on_style_preset_changed(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
+{
+	(void)props;
+	(void)p;
+	const char *preset = obs_data_get_string(settings, "style_preset");
+	if (!preset) {
+		return false;
+	}
+
+	if (strcmp(preset, "custom") == 0) {
+		// If switching back to "custom", restore the previously saved custom configuration!
+		if (obs_data_get_bool(settings, "_custom_has_backup")) {
+			obs_data_set_int(settings, "text_color", obs_data_get_int(settings, "_custom_text_color"));
+			obs_data_set_bool(settings, "outline", obs_data_get_bool(settings, "_custom_outline"));
+			obs_data_set_int(settings, "outline_size", obs_data_get_int(settings, "_custom_outline_size"));
+			obs_data_set_int(settings, "outline_opacity", obs_data_get_int(settings, "_custom_outline_opacity"));
+			obs_data_set_int(settings, "outline_color", obs_data_get_int(settings, "_custom_outline_color"));
+			obs_data_set_bool(settings, "drop_shadow", obs_data_get_bool(settings, "_custom_drop_shadow"));
+			obs_data_set_int(settings, "bg_color", obs_data_get_int(settings, "_custom_bg_color"));
+			obs_data_set_string(settings, "align", obs_data_get_string(settings, "_custom_align"));
+
+			obs_data_t *custom_font = obs_data_get_obj(settings, "_custom_font");
+			if (custom_font) {
+				obs_data_set_obj(settings, "font", custom_font);
+				obs_data_release(custom_font);
+			}
+			obs_data_set_string(settings, "_prev_preset", "custom");
+			return true;
+		}
+		obs_data_set_string(settings, "_prev_preset", "custom");
+		return false;
+	}
+
+	// We are selecting a preset (netflix, minimal_pill, anime_fansub, cyberpunk_neon, high_contrast).
+	// If previous state was on custom, save current custom state first!
+	const char *prev_preset = obs_data_get_string(settings, "_prev_preset");
+	if (!prev_preset || strcmp(prev_preset, "custom") == 0 || !obs_data_get_bool(settings, "_custom_has_backup")) {
+		obs_data_set_int(settings, "_custom_text_color", obs_data_get_int(settings, "text_color"));
+		obs_data_set_bool(settings, "_custom_outline", obs_data_get_bool(settings, "outline"));
+		obs_data_set_int(settings, "_custom_outline_size", obs_data_get_int(settings, "outline_size"));
+		obs_data_set_int(settings, "_custom_outline_opacity", obs_data_get_int(settings, "outline_opacity"));
+		obs_data_set_int(settings, "_custom_outline_color", obs_data_get_int(settings, "outline_color"));
+		obs_data_set_bool(settings, "_custom_drop_shadow", obs_data_get_bool(settings, "drop_shadow"));
+		obs_data_set_int(settings, "_custom_bg_color", obs_data_get_int(settings, "bg_color"));
+		obs_data_set_string(settings, "_custom_align", obs_data_get_string(settings, "align"));
+
+		obs_data_t *current_font = obs_data_get_obj(settings, "font");
+		if (current_font) {
+			obs_data_set_obj(settings, "_custom_font", current_font);
+			obs_data_release(current_font);
+		}
+		obs_data_set_bool(settings, "_custom_has_backup", true);
+	}
+	obs_data_set_string(settings, "_prev_preset", preset);
+
+	obs_data_t *font_obj = obs_data_create();
+
+	if (strcmp(preset, "netflix") == 0) {
+		obs_data_set_int(settings, "text_color", 0xFFFFFFFF);
+		obs_data_set_bool(settings, "outline", true);
+		obs_data_set_int(settings, "outline_size", 2);
+		obs_data_set_int(settings, "outline_opacity", 90);
+		obs_data_set_int(settings, "outline_color", 0xFF000000);
+		obs_data_set_bool(settings, "drop_shadow", true);
+		obs_data_set_int(settings, "bg_color", 0x99000000); // 60% translucent black
+		obs_data_set_string(settings, "align", "center");
+
+		obs_data_set_string(font_obj, "face", "Arial");
+		obs_data_set_string(font_obj, "style", "Regular");
+		obs_data_set_int(font_obj, "size", 48);
+	} else if (strcmp(preset, "minimal_pill") == 0) {
+		obs_data_set_int(settings, "text_color", 0xFFFFFFFF);
+		obs_data_set_bool(settings, "outline", false);
+		obs_data_set_int(settings, "outline_size", 0);
+		obs_data_set_int(settings, "outline_opacity", 0);
+		obs_data_set_int(settings, "outline_color", 0xFF000000);
+		obs_data_set_bool(settings, "drop_shadow", false);
+		obs_data_set_int(settings, "bg_color", 0xCC1E1E24); // Dark gray pill background
+		obs_data_set_string(settings, "align", "left");
+
+		obs_data_set_string(font_obj, "face", "Segoe UI");
+		obs_data_set_string(font_obj, "style", "Semibold");
+		obs_data_set_int(font_obj, "size", 46);
+	} else if (strcmp(preset, "anime_fansub") == 0) {
+		obs_data_set_int(settings, "text_color", 0xFF00E5FF); // Bright Yellow
+		obs_data_set_bool(settings, "outline", true);
+		obs_data_set_int(settings, "outline_size", 5);
+		obs_data_set_int(settings, "outline_opacity", 100);
+		obs_data_set_int(settings, "outline_color", 0xFF000000); // Solid black outline
+		obs_data_set_bool(settings, "drop_shadow", true);
+		obs_data_set_int(settings, "bg_color", 0x00000000); // Transparent background
+		obs_data_set_string(settings, "align", "left");
+
+		obs_data_set_string(font_obj, "face", "Arial");
+		obs_data_set_string(font_obj, "style", "Bold");
+		obs_data_set_int(font_obj, "size", 54);
+	} else if (strcmp(preset, "cyberpunk_neon") == 0) {
+		obs_data_set_int(settings, "text_color", 0xFFFFF000); // Neon Cyan
+		obs_data_set_bool(settings, "outline", true);
+		obs_data_set_int(settings, "outline_size", 4);
+		obs_data_set_int(settings, "outline_opacity", 100);
+		obs_data_set_int(settings, "outline_color", 0xFFFF0070); // Magenta outline
+		obs_data_set_bool(settings, "drop_shadow", true);
+		obs_data_set_int(settings, "bg_color", 0xAA200530); // Deep violet translucent
+		obs_data_set_string(settings, "align", "left");
+
+		obs_data_set_string(font_obj, "face", "Trebuchet MS");
+		obs_data_set_string(font_obj, "style", "Bold");
+		obs_data_set_int(font_obj, "size", 50);
+	} else if (strcmp(preset, "high_contrast") == 0) {
+		obs_data_set_int(settings, "text_color", 0xFF00FFFF); // High-contrast Yellow
+		obs_data_set_bool(settings, "outline", true);
+		obs_data_set_int(settings, "outline_size", 3);
+		obs_data_set_int(settings, "outline_opacity", 100);
+		obs_data_set_int(settings, "outline_color", 0xFF000000);
+		obs_data_set_bool(settings, "drop_shadow", false);
+		obs_data_set_int(settings, "bg_color", 0xFF000000); // 100% Solid Black
+		obs_data_set_string(settings, "align", "left");
+
+		obs_data_set_string(font_obj, "face", "Arial");
+		obs_data_set_string(font_obj, "style", "Bold");
+		obs_data_set_int(font_obj, "size", 56);
+	}
+
+	obs_data_set_obj(settings, "font", font_obj);
+	obs_data_release(font_obj);
+
+	return true; // Refreshes OBS properties dialog
+}
+
 // Register source properties
 static obs_properties_t *my_font_get_properties(void *data)
 {
 	(void)data;
 	obs_properties_t *props = obs_properties_create();
 
-	// Font & Colors group
+	// 1. Group: Presets
+	obs_properties_t *group_presets = obs_properties_create();
+	obs_property_t *p_preset = obs_properties_add_list(
+		group_presets, "style_preset", "Plantilla de Estilo:",
+		OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
+	obs_property_list_add_string(p_preset, "Personalizado (Sin cambios automáticos)", "custom");
+	obs_property_list_add_string(p_preset, "Netflix / Cine (Fondo translúcido + Sombra)", "netflix");
+	obs_property_list_add_string(p_preset, "Pill Minimalista (Tarjeta moderna)", "minimal_pill");
+	obs_property_list_add_string(p_preset, "Anime / Fansub (Amarillo + Borde grueso)", "anime_fansub");
+	obs_property_list_add_string(p_preset, "Cyberpunk / Neón (Cian + Borde magenta)", "cyberpunk_neon");
+	obs_property_list_add_string(p_preset, "Alto Contraste / Accesibilidad (Amarillo + Fondo negro)", "high_contrast");
+
+	obs_property_set_modified_callback(p_preset, on_style_preset_changed);
+
+	obs_properties_add_group(props, "grp_presets", "1. Plantillas de Diseño",
+				 OBS_GROUP_NORMAL, group_presets);
+
+	// 2. Group: Font & Colors
 	obs_properties_t *group_appearance = obs_properties_create();
 	obs_properties_add_font(group_appearance, "font", "Tipografía:");
-	obs_properties_add_color_alpha(group_appearance, "text_color", "Color de Letras:");
+	obs_properties_add_color_alpha(group_appearance, "text_color", "Color del Texto:");
 	obs_properties_add_bool(group_appearance, "outline", "Contorno de Texto");
 	obs_properties_add_int(group_appearance, "outline_size", "Grosor del Contorno:", 1, 20, 1);
 	obs_properties_add_int(group_appearance, "outline_opacity", "Opacidad del Contorno (%):", 0, 100, 1);
@@ -305,13 +535,18 @@ static obs_properties_t *my_font_get_properties(void *data)
 	obs_properties_add_bool(group_appearance, "drop_shadow", "Sombra Paralela");
 	obs_properties_add_color_alpha(group_appearance, "bg_color", "Color de Fondo:");
 
-	obs_properties_add_group(props, "grp_appearance", "1. Estilo de Fuente y Colores",
+	obs_properties_add_group(props, "grp_appearance", "2. Tipografía y Colores",
 				 OBS_GROUP_NORMAL, group_appearance);
 
-
-
-	// Layout & Wrap group
+	// 3. Group: Layout & Format
 	obs_properties_t *group_layout = obs_properties_create();
+	obs_property_t *p_align = obs_properties_add_list(
+		group_layout, "align", "Alineación Horizontal:",
+		OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
+	obs_property_list_add_string(p_align, "Izquierda", "left");
+	obs_property_list_add_string(p_align, "Centro", "center");
+	obs_property_list_add_string(p_align, "Derecha", "right");
+
 	obs_properties_add_int(group_layout, "max_lines", "Máximo de Renglones:", 1, 10, 1);
 	obs_properties_add_bool(group_layout, "bottom_align", "Centrar Verticalmente (Caja de altura fija)");
 
@@ -331,6 +566,10 @@ static obs_properties_t *my_font_get_properties(void *data)
 // Set default property values
 static void my_font_get_defaults(obs_data_t *settings)
 {
+	obs_data_set_default_string(settings, "style_preset", "custom");
+	obs_data_set_default_string(settings, "_prev_preset", "custom");
+	obs_data_set_default_bool(settings, "_custom_has_backup", false);
+
 	obs_data_set_default_int(settings, "text_color", 0xFFFFFFFF);
 	obs_data_set_default_bool(settings, "outline", true);
 	obs_data_set_default_int(settings, "outline_size", 3);
@@ -340,13 +579,11 @@ static void my_font_get_defaults(obs_data_t *settings)
 	obs_data_set_default_int(settings, "bg_color", 0x00000000);
 	obs_data_set_default_bool(settings, "antialiasing", true);
 
-
+	obs_data_set_default_string(settings, "align", "left");
 
 	obs_data_set_default_bool(settings, "word_wrap", true);
 	obs_data_set_default_int(settings, "custom_width", 900);
 	obs_data_set_default_bool(settings, "fixed_bg_width", true);
-
-
 
 	obs_data_t *font_obj = obs_data_create();
 	obs_data_set_string(font_obj, "face", "Arial");
@@ -377,6 +614,8 @@ static void my_font_update(void *data, obs_data_t *settings)
 	bool fixed_bg_width = obs_data_get_bool(settings, "fixed_bg_width");
 	int max_lines = (int)obs_data_get_int(settings, "max_lines");
 	bool bottom_align = obs_data_get_bool(settings, "bottom_align");
+	const char *align_str = obs_data_get_string(settings, "align");
+	std::string align = (align_str && *align_str) ? align_str : "center";
 	// _is_partial is written by the audio filter, not shown in UI
 	bool is_partial = obs_data_get_bool(settings, "_is_partial");
 
@@ -471,38 +710,44 @@ static void my_font_update(void *data, obs_data_t *settings)
 
 	bool text_changed = (ctx->cached_text != text_to_set);
 	
-	if (text_changed && !ctx->cached_text.empty() && !text_to_set.empty()) {
-		// Reset animation ONLY if we're moving from text to text 
-		// (don't animate when clearing or opening properties, though a small pop on clear is fine)
-		ctx->anim_start_time = os_gettime_ns();
-		// Capture previous dimensions for morphing
-		uint32_t current_cy = obs_source_get_height(ctx->text_font);
-		uint32_t lang_cy = ctx->cached_lang_code.empty() ? 0 : obs_source_get_height(ctx->lang_font);
-		float max_h = ctx->cached_max_lines * ((float)font_size * 1.4f) + 20.0f + (float)lang_cy;
-		
-		ctx->prev_bg_width = ctx->cached_fixed_bg_width ? (float)ctx->cached_custom_width : (float)(obs_source_get_width(ctx->text_font) + 20);
-		ctx->prev_bg_height = ctx->cached_bottom_align ? max_h : (float)(current_cy + 20 + lang_cy);
-		ctx->is_new_sentence_anim = false;
-	} else if (text_changed && ctx->cached_text.empty() && !text_to_set.empty()) {
-		// New sentence starts -> fade in and slide up
-		ctx->anim_start_time = os_gettime_ns();
-		ctx->prev_bg_width = 0.0f;
-		ctx->prev_bg_height = 0.0f;
-		ctx->is_new_sentence_anim = true;
-	} else if (text_changed && text_to_set.empty()) {
-		// If text is cleared, reset prev dimensions so next text pops up cleanly
-		ctx->prev_bg_width = 0.0f;
-		ctx->prev_bg_height = 0.0f;
-		ctx->is_new_sentence_anim = false;
-	}
+	if (text_changed && !text_to_set.empty()) {
+		if (ctx->cached_text.empty() || ctx->anim_state == SubtitleAnimState::ANIM_IDLE || ctx->anim_state == SubtitleAnimState::ANIM_FADE_OUT) {
+			// New sentence starts -> fade in and slide up
+			ctx->anim_start_time = os_gettime_ns();
+			ctx->prev_bg_width = 0.0f;
+			ctx->prev_bg_height = 0.0f;
+			ctx->is_new_sentence_anim = true;
+			ctx->anim_state = SubtitleAnimState::ANIM_FADE_IN;
+			ctx->last_rendered_opacity = 0;
+		} else {
+			// Moving from active text to new text -> morph dimensions
+			ctx->anim_start_time = os_gettime_ns();
+			uint32_t current_cy = obs_source_get_height(ctx->text_font);
+			uint32_t lang_cy = ctx->cached_lang_code.empty() ? 0 : obs_source_get_height(ctx->lang_font);
+			float max_h = ctx->cached_max_lines * ((float)font_size * 1.4f) + 20.0f + (float)lang_cy;
 
-	if (text_changed) {
+			ctx->prev_bg_width = ctx->cached_fixed_bg_width ? (float)ctx->cached_custom_width : (float)(obs_source_get_width(ctx->text_font) + 20);
+			ctx->prev_bg_height = ctx->cached_bottom_align ? max_h : (float)(current_cy + 20 + lang_cy);
+			ctx->is_new_sentence_anim = false;
+			ctx->anim_state = SubtitleAnimState::ANIM_VISIBLE;
+		}
 		ctx->displayed_text = text_to_set;
+		ctx->cached_text = text_to_set;
+	} else if (text_changed && text_to_set.empty()) {
+		// Target text cleared (silence timeout or manual clear)
+		if (!ctx->displayed_text.empty() && ctx->anim_state != SubtitleAnimState::ANIM_IDLE) {
+			ctx->anim_start_time = os_gettime_ns();
+			ctx->anim_state = SubtitleAnimState::ANIM_FADE_OUT;
+			ctx->is_new_sentence_anim = false;
+			ctx->cached_text = "";
+			// Keep displayed_text and dimensions alive during fade out
+		}
 	}
 
 	bool layout_changed = (ctx->cached_custom_width != custom_width ||
 	                       ctx->cached_fixed_bg_width != (fixed_bg_width && word_wrap) ||
 	                       ctx->cached_bottom_align != bottom_align ||
+	                       ctx->cached_align != align ||
 	                       ctx->cached_max_lines != max_lines ||
 	                       ctx->cached_word_wrap != word_wrap);
 
@@ -519,15 +764,20 @@ static void my_font_update(void *data, obs_data_t *settings)
 	// AFTER computing changes, update cached flags
 	ctx->cached_is_partial = is_partial;
 
-	if (text_changed || appearance_changed || layout_changed) {
+	bool should_update_source = (text_changed && !text_to_set.empty()) || appearance_changed || layout_changed;
+
+	if (should_update_source) {
 		obs_data_t *text_settings = obs_data_create();
 		obs_data_set_string(text_settings, "text", ctx->displayed_text.c_str());
 
+		int opacity_to_set = (ctx->anim_state == SubtitleAnimState::ANIM_FADE_IN) ? 0 : text_opacity;
+		int outline_op_to_set = (ctx->anim_state == SubtitleAnimState::ANIM_FADE_IN) ? 0 : outline_opacity;
+
 		apply_text_color(text_settings, text_color);
-		obs_data_set_int(text_settings, "opacity", text_opacity);
+		obs_data_set_int(text_settings, "opacity", opacity_to_set);
 		obs_data_set_bool(text_settings, "outline", outline);
 		obs_data_set_int(text_settings, "outline_size", outline_size);
-		obs_data_set_int(text_settings, "outline_opacity", outline_opacity);
+		obs_data_set_int(text_settings, "outline_opacity", outline_op_to_set);
 		obs_data_set_int(text_settings, "outline_color", outline_color);
 		obs_data_set_bool(text_settings, "antialiasing", antialiasing);
 
@@ -553,6 +803,7 @@ static void my_font_update(void *data, obs_data_t *settings)
 		obs_data_set_bool(text_settings, "word_wrap", word_wrap);
 		obs_data_set_int(text_settings, "custom_width", custom_width);
 		obs_data_set_int(text_settings, "cx", custom_width);
+		obs_data_set_string(text_settings, "align", align.c_str());
 
 		// Update all cached state fields
 		ctx->cached_text_color = text_color;
@@ -568,6 +819,7 @@ static void my_font_update(void *data, obs_data_t *settings)
 		ctx->cached_custom_width = custom_width;
 		ctx->cached_fixed_bg_width = fixed_bg_width && word_wrap;
 		ctx->cached_bottom_align = bottom_align;
+		ctx->cached_align = align;
 		ctx->cached_max_lines = max_lines;
 		ctx->cached_text = text_to_set;
 
@@ -592,10 +844,14 @@ static void my_font_update(void *data, obs_data_t *settings)
 		obs_data_set_obj(lang_settings, "font", l_font);
 		obs_data_release(l_font);
 		
+		int lang_op_to_set = (ctx->anim_state == SubtitleAnimState::ANIM_FADE_IN) ? 0 : 100;
+		int lang_outline_op_to_set = (ctx->anim_state == SubtitleAnimState::ANIM_FADE_IN) ? 0 : 100;
+
 		apply_text_color(lang_settings, 0xFFBBBBBB);
+		obs_data_set_int(lang_settings, "opacity", lang_op_to_set);
 		obs_data_set_bool(lang_settings, "outline", true);
 		obs_data_set_int(lang_settings, "outline_size", 5);
-		obs_data_set_int(lang_settings, "outline_opacity", 100);
+		obs_data_set_int(lang_settings, "outline_opacity", lang_outline_op_to_set);
 		obs_data_set_int(lang_settings, "outline_color", 0xFF000000);
 		
 		obs_source_update(ctx->lang_font, lang_settings);
@@ -612,6 +868,15 @@ static void my_font_update(void *data, obs_data_t *settings)
 		obs_source_update(ctx->color_font, bg_settings);
 		obs_data_release(bg_settings);
 		ctx->cached_bg_color = bg_color;
+		ctx->last_rendered_bg_color = bg_color;
+	} else if (ctx->anim_state == SubtitleAnimState::ANIM_FADE_IN && ctx->cached_bg_color != -1) {
+		obs_data_t *bg_settings = obs_data_create();
+		obs_data_set_int(bg_settings, "color", (ctx->cached_bg_color & 0x00FFFFFF));
+		obs_data_set_int(bg_settings, "width", 1);
+		obs_data_set_int(bg_settings, "height", 1);
+		obs_source_update(ctx->color_font, bg_settings);
+		obs_data_release(bg_settings);
+		ctx->last_rendered_bg_color = (ctx->cached_bg_color & 0x00FFFFFF);
 	}
 }
 
@@ -619,31 +884,81 @@ static void my_font_video_tick(void *data, float seconds)
 {
 	(void)seconds;
 	MyCaptionsFont *ctx = (MyCaptionsFont *)data;
+	uint64_t now = os_gettime_ns();
+	const float fade_in_duration_ns = 350000000.0f;  // 350ms smooth ease-out
+	const float fade_out_duration_ns = 350000000.0f; // 350ms
 	
-	if (ctx->is_new_sentence_anim) {
-		uint64_t now = os_gettime_ns();
-		float anim_duration_ns = 250000000.0f; // 250ms
-		
-		int target_opacity = 100;
-		if (ctx->anim_start_time > 0 && now - ctx->anim_start_time < (uint64_t)anim_duration_ns) {
-			float progress = (float)(now - ctx->anim_start_time) / anim_duration_ns;
+	int target_opacity = ctx->last_rendered_opacity;
+
+	if (ctx->anim_state == SubtitleAnimState::ANIM_FADE_IN) {
+		if (ctx->anim_start_time > 0 && now - ctx->anim_start_time < (uint64_t)fade_in_duration_ns) {
+			float progress = (float)(now - ctx->anim_start_time) / fade_in_duration_ns;
+			// Cubic ease-out
 			progress = 1.0f - std::pow(1.0f - progress, 3.0f);
 			target_opacity = (int)(progress * 100.0f);
 		} else {
-			ctx->is_new_sentence_anim = false; // animation finished
+			target_opacity = 100;
+			ctx->anim_state = SubtitleAnimState::ANIM_VISIBLE;
+			ctx->is_new_sentence_anim = false;
 		}
+	} else if (ctx->anim_state == SubtitleAnimState::ANIM_FADE_OUT) {
+		if (ctx->anim_start_time > 0 && now - ctx->anim_start_time < (uint64_t)fade_out_duration_ns) {
+			float progress = (float)(now - ctx->anim_start_time) / fade_out_duration_ns;
+			// Smooth quadratic deceleration towards 0
+			float alpha = 1.0f - progress;
+			alpha = alpha * alpha;
+			target_opacity = (int)(alpha * 100.0f);
+		} else {
+			target_opacity = 0;
+			ctx->anim_state = SubtitleAnimState::ANIM_IDLE;
+			ctx->displayed_text.clear();
+			ctx->cached_text.clear();
+			ctx->prev_bg_width = 0.0f;
+			ctx->prev_bg_height = 0.0f;
+			ctx->current_bg_width = 0.0f;
+			ctx->current_bg_height = 0.0f;
+
+			// Clear text in internal sources cleanly
+			obs_data_t *clear_settings = obs_data_create();
+			obs_data_set_string(clear_settings, "text", "");
+			obs_data_set_int(clear_settings, "opacity", 0);
+			obs_source_update(ctx->text_font, clear_settings);
+			obs_source_update(ctx->lang_font, clear_settings);
+			obs_data_release(clear_settings);
+		}
+	} else if (ctx->anim_state == SubtitleAnimState::ANIM_VISIBLE) {
+		target_opacity = 100;
+	} else if (ctx->anim_state == SubtitleAnimState::ANIM_IDLE) {
+		target_opacity = 0;
+	}
+
+	if (target_opacity != ctx->last_rendered_opacity) {
+		ctx->last_rendered_opacity = target_opacity;
+
+		obs_data_t *text_settings = obs_data_create();
+		int new_outline_op = (int)(((float)target_opacity / 100.0f) * (float)ctx->cached_outline_opacity);
 		
-		if (target_opacity != ctx->last_rendered_opacity) {
-			obs_data_t *text_settings = obs_data_create();
-			int new_outline_op = (int)((target_opacity / 100.0f) * (float)ctx->cached_outline_opacity);
-			
-			obs_data_set_int(text_settings, "opacity", target_opacity);
-			obs_data_set_int(text_settings, "outline_opacity", new_outline_op);
-			obs_source_update(ctx->text_font, text_settings);
-			obs_source_update(ctx->lang_font, text_settings);
-			obs_data_release(text_settings);
-			
-			ctx->last_rendered_opacity = target_opacity;
+		obs_data_set_int(text_settings, "opacity", target_opacity);
+		obs_data_set_int(text_settings, "outline_opacity", new_outline_op);
+		obs_source_update(ctx->text_font, text_settings);
+		obs_source_update(ctx->lang_font, text_settings);
+		obs_data_release(text_settings);
+
+		// Also modulate the background rectangle alpha!
+		if (ctx->cached_bg_color != -1) {
+			uint32_t bg_a = (uint32_t)((ctx->cached_bg_color >> 24) & 0xFF);
+			uint32_t mod_a = (uint32_t)(bg_a * ((float)target_opacity / 100.0f));
+			long long current_bg = (ctx->cached_bg_color & 0x00FFFFFF) | ((long long)mod_a << 24);
+
+			if (current_bg != ctx->last_rendered_bg_color) {
+				obs_data_t *bg_settings = obs_data_create();
+				obs_data_set_int(bg_settings, "color", current_bg);
+				obs_data_set_int(bg_settings, "width", 1);
+				obs_data_set_int(bg_settings, "height", 1);
+				obs_source_update(ctx->color_font, bg_settings);
+				obs_data_release(bg_settings);
+				ctx->last_rendered_bg_color = current_bg;
+			}
 		}
 	}
 }

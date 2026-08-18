@@ -34,6 +34,37 @@ public:
         return QIcon(pixmap);
     }
 
+    static QIcon iconMicMuted(const QColor &color = QColor("#d4883b"), int size = 24)
+    {
+        QPixmap pixmap(size, size);
+        pixmap.fill(Qt::transparent);
+        QPainter p(&pixmap);
+        p.setRenderHint(QPainter::Antialiasing);
+
+        QPen pen(color, 1.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+        p.setPen(pen);
+        p.setBrush(QBrush(color));
+
+        // Mic capsule
+        p.drawRoundedRect(QRectF(size * 0.35, size * 0.15, size * 0.30, size * 0.45), size * 0.15, size * 0.15);
+
+        // Mic arc
+        p.setBrush(Qt::NoBrush);
+        QRectF arcRect(size * 0.22, size * 0.25, size * 0.56, size * 0.42);
+        p.drawArc(arcRect, 0, -180 * 16);
+
+        // Stand base
+        p.drawLine(QPointF(size * 0.5, size * 0.67), QPointF(size * 0.5, size * 0.84));
+        p.drawLine(QPointF(size * 0.32, size * 0.84), QPointF(size * 0.68, size * 0.84));
+
+        // Diagonal slash line
+        QPen slashPen(color, 2.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+        p.setPen(slashPen);
+        p.drawLine(QPointF(size * 0.20, size * 0.15), QPointF(size * 0.80, size * 0.85));
+
+        return QIcon(pixmap);
+    }
+
     static QIcon iconPause(const QColor &color = QColor("#cccccc"), int size = 24)
     {
         QPixmap pixmap(size, size);
