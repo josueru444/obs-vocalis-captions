@@ -7,7 +7,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/common/bootstrap.cmake" NO_POLICY_SCO
 project(${_name} VERSION ${_version})
 
 set(ENABLE_FRONTEND_API ON CACHE BOOL "Use obs-frontend-api for UI functionality" FORCE)
-option(ENABLE_QT "Use Qt functionality" OFF)
+option(ENABLE_QT "Use Qt functionality" ON)
 
 include(compilerconfig)
 include(defaults)
@@ -16,8 +16,13 @@ include(helpers)
 add_library(${CMAKE_PROJECT_NAME} MODULE
         src/ai_audio_filter.cpp
         src/ai_audio_filter.h
-        #ui/setup.cpp
-        #ui/setup.h
+        src/ui/translator_ui.cpp
+        src/ui/translator_ui.h
+        src/ui/translator_dock.cpp
+        src/ui/translator_dock.h
+        src/ui/vector_icons.h
+        src/ui/translator_settings_dialog.cpp
+        src/ui/translator_settings_dialog.h
         src/ai_subtitle_source.cpp
         src/ai_subtitle_source.h
         src/subtitle_animator.cpp

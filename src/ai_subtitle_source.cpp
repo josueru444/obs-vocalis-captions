@@ -655,6 +655,7 @@ extern "C" struct obs_source_info get_my_font_info()
 	info.id = "fuente_subtitulos_ia";
 	info.type = OBS_SOURCE_TYPE_INPUT;
 	info.output_flags = OBS_SOURCE_VIDEO;
+	info.icon_type = OBS_ICON_TYPE_BROWSER;
 
 	info.get_name = [](void *) {
 		return "Subtítulos IA";

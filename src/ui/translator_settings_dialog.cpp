@@ -1,0 +1,290 @@
+#include "translator_settings_dialog.h"
+#include "vector_icons.h"
+#include "../ai_audio_filter.h"
+#include <obs.hpp>
+#include <QMessageBox>
+#include <QFileDialog>
+
+TranslatorSettingsDialog::TranslatorSettingsDialog(QWidget *parent)
+    : QDialog(parent)
+{
+    setWindowTitle("Configuración del Traductor IA");
+    resize(520, 440);
+    setupUi();
+    loadCurrentSettings();
+}
+
+void TranslatorSettingsDialog::setupUi()
+{
+    QVBoxLayout *mainLayout = new QVBoxLayout(this);
+
+    m_tabWidget = new QTabWidget(this);
+
+    // ── Tab 1: Servidor Remoto (WebSocket) ──────────────────────────────────
+    QWidget *tabRemote = new QWidget();
+    QVBoxLayout *remoteLayout = new QVBoxLayout(tabRemote);
+
+    m_chkUseRemote = new QCheckBox("Usar Servidor Remoto de Transcripción (WebSocket)", this);
+    connect(m_chkUseRemote, &QCheckBox::toggled, this, &TranslatorSettingsDialog::onRemoteModeToggled);
+    remoteLayout->addWidget(m_chkUseRemote);
+
+    QGroupBox *grpRemoteConfig = new QGroupBox("Ajustes de Conexión", this);
+    QFormLayout *formRemote = new QFormLayout(grpRemoteConfig);
+
+    m_txtWsUrl = new QLineEdit(this);
+    m_txtWsUrl->setPlaceholderText("ws://127.0.0.1:8765/ws");
+    formRemote->addRow("URL del Servidor:", m_txtWsUrl);
+
+    m_txtWsToken = new QLineEdit(this);
+    m_txtWsToken->setEchoMode(QLineEdit::Password);
+    m_txtWsToken->setPlaceholderText("Opcional");
+    formRemote->addRow("Token / Clave de Acceso:", m_txtWsToken);
+
+    m_cmbPartialMode = new QComboBox(this);
+    m_cmbPartialMode->addItem("Tiempo Real (0.5s - Fluidez continua)", "realtime");
+    m_cmbPartialMode->addItem("Balanceado (1.0s - Mayor estabilidad)", "balanced");
+    formRemote->addRow("Modo de Envío:", m_cmbPartialMode);
+
+    remoteLayout->addWidget(grpRemoteConfig);
+    remoteLayout->addStretch();
+    m_tabWidget->addTab(tabRemote, "Servidor Remoto");
+
+    // ── Tab 2: Motor Local (Whisper) ────────────────────────────────────────
+    QWidget *tabWhisper = new QWidget();
+    QVBoxLayout *whisperLayout = new QVBoxLayout(tabWhisper);
+
+    QGroupBox *grpModel = new QGroupBox("Modelo de Inteligencia Artificial", this);
+    QVBoxLayout *modelLayout = new QVBoxLayout(grpModel);
+
+    m_cmbModel = new QComboBox(this);
+    m_cmbModel->addItem("Tiny (Rápido y Ligero)", "ggml-tiny.bin");
+    m_cmbModel->addItem("Base (Balanceado)", "ggml-base.bin");
+    m_cmbModel->addItem("Small (Alta Precisión)", "ggml-small.bin");
+    modelLayout->addWidget(m_cmbModel);
+
+    m_chkUseCustomModel = new QCheckBox("Usar modelo personalizado (.bin)", this);
+    connect(m_chkUseCustomModel, &QCheckBox::toggled, this, &TranslatorSettingsDialog::onCustomModelToggled);
+    modelLayout->addWidget(m_chkUseCustomModel);
+
+    m_widgetCustomModel = new QWidget(this);
+    QHBoxLayout *customModelLayout = new QHBoxLayout(m_widgetCustomModel);
+    customModelLayout->setContentsMargins(0, 0, 0, 0);
+    customModelLayout->setSpacing(4);
+
+    m_txtCustomModelPath = new QLineEdit(m_widgetCustomModel);
+    m_txtCustomModelPath->setPlaceholderText("Ruta del archivo de modelo GGML...");
+    customModelLayout->addWidget(m_txtCustomModelPath);
+
+    m_btnBrowseModel = new QPushButton(m_widgetCustomModel);
+    m_btnBrowseModel->setIcon(VectorIcons::iconFolder(QColor("#cccccc"), 16));
+    m_btnBrowseModel->setToolTip("Examinar archivo de modelo");
+    m_btnBrowseModel->setFixedWidth(32);
+    connect(m_btnBrowseModel, &QPushButton::clicked, this, &TranslatorSettingsDialog::onBrowseCustomModel);
+    customModelLayout->addWidget(m_btnBrowseModel);
+
+    modelLayout->addWidget(m_widgetCustomModel);
+    whisperLayout->addWidget(grpModel);
+
+    QGroupBox *grpHardware = new QGroupBox("Rendimiento y Hardware", this);
+    QFormLayout *formHardware = new QFormLayout(grpHardware);
+
+    m_chkUseGpu = new QCheckBox("Aceleración por Tarjeta Gráfica (GPU / Vulkan)", this);
+    formHardware->addRow("GPU:", m_chkUseGpu);
+
+    m_spnThreads = new QSpinBox(this);
+    m_spnThreads->setRange(1, 16);
+    m_spnThreads->setValue(4);
+    formHardware->addRow("Hilos de CPU:", m_spnThreads);
+
+    whisperLayout->addWidget(grpHardware);
+    whisperLayout->addStretch();
+    m_tabWidget->addTab(tabWhisper, "Motor Local (Whisper)");
+
+    // ── Tab 3: Idiomas ──────────────────────────────────────────────────────
+    QWidget *tabLanguages = new QWidget();
+    QFormLayout *formLang = new QFormLayout(tabLanguages);
+
+    m_cmbLangIn = new QComboBox(this);
+    m_cmbLangIn->addItem("Detección Automática", "auto");
+    m_cmbLangIn->addItem("Español", "es");
+    m_cmbLangIn->addItem("Inglés", "en");
+    m_cmbLangIn->addItem("Francés", "fr");
+    m_cmbLangIn->addItem("Alemán", "de");
+    m_cmbLangIn->addItem("Italiano", "it");
+    m_cmbLangIn->addItem("Portugués", "pt");
+    m_cmbLangIn->addItem("Polaco", "pl");
+    m_cmbLangIn->addItem("Japonés", "ja");
+    m_cmbLangIn->addItem("Chino", "zh");
+    formLang->addRow("Idioma de Entrada (Habla):", m_cmbLangIn);
+
+    m_cmbLangOut = new QComboBox(this);
+    m_cmbLangOut->addItem("Original (Mismo que se habla)", "original");
+    m_cmbLangOut->addItem("Inglés", "en");
+    m_cmbLangOut->addItem("Español", "es");
+    m_cmbLangOut->addItem("Francés", "fr");
+    m_cmbLangOut->addItem("Alemán", "de");
+    m_cmbLangOut->addItem("Italiano", "it");
+    m_cmbLangOut->addItem("Portugués", "pt");
+    m_cmbLangOut->addItem("Polaco", "pl");
+    m_cmbLangOut->addItem("Japonés", "ja");
+    m_cmbLangOut->addItem("Chino", "zh");
+    formLang->addRow("Idioma de Salida (Traducción):", m_cmbLangOut);
+
+    QLabel *lblLangNote = new QLabel("Nota: El motor local (Whisper) traduce directamente hacia el Inglés. El servidor remoto soporta cualquier combinación entre idiomas.", this);
+    lblLangNote->setWordWrap(true);
+    lblLangNote->setStyleSheet("color: #7f8c8d; font-size: 8.5pt; margin-top: 10px;");
+    formLang->addRow(lblLangNote);
+
+    m_tabWidget->addTab(tabLanguages, "Idiomas");
+
+    // ── Tab 4: Detección de Voz (VAD) ───────────────────────────────────────
+    QWidget *tabVad = new QWidget();
+    QFormLayout *formVad = new QFormLayout(tabVad);
+
+    m_spnVadThreshold = new QDoubleSpinBox(this);
+    m_spnVadThreshold->setRange(0.001, 1.0);
+    m_spnVadThreshold->setSingleStep(0.005);
+    m_spnVadThreshold->setDecimals(3);
+    m_spnVadThreshold->setValue(0.020);
+    formVad->addRow("Umbral de Silencio (RMS):", m_spnVadThreshold);
+
+    m_spnMinSpeechMs = new QSpinBox(this);
+    m_spnMinSpeechMs->setRange(50, 2000);
+    m_spnMinSpeechMs->setSingleStep(50);
+    m_spnMinSpeechMs->setValue(250);
+    m_spnMinSpeechMs->setSuffix(" ms");
+    formVad->addRow("Duración mínima de voz:", m_spnMinSpeechMs);
+
+    m_spnHangoverMs = new QSpinBox(this);
+    m_spnHangoverMs->setRange(100, 3000);
+    m_spnHangoverMs->setSingleStep(50);
+    m_spnHangoverMs->setValue(400);
+    m_spnHangoverMs->setSuffix(" ms");
+    formVad->addRow("Margen de silencio tras hablar:", m_spnHangoverMs);
+
+    m_tabWidget->addTab(tabVad, "Detección de Voz (VAD)");
+
+    mainLayout->addWidget(m_tabWidget);
+
+    // ── Bottom Action Buttons ───────────────────────────────────────────────
+    QHBoxLayout *btnLayout = new QHBoxLayout();
+    btnLayout->addStretch();
+
+    m_btnCancel = new QPushButton("Cancelar", this);
+    connect(m_btnCancel, &QPushButton::clicked, this, &QDialog::reject);
+    btnLayout->addWidget(m_btnCancel);
+
+    m_btnSave = new QPushButton("Guardar y Aplicar", this);
+    m_btnSave->setDefault(true);
+    m_btnSave->setStyleSheet("font-weight: bold; padding: 6px 16px;");
+    connect(m_btnSave, &QPushButton::clicked, this, &TranslatorSettingsDialog::onSaveClicked);
+    btnLayout->addWidget(m_btnSave);
+
+    mainLayout->addLayout(btnLayout);
+}
+
+void TranslatorSettingsDialog::onCustomModelToggled(bool checked)
+{
+    m_widgetCustomModel->setVisible(checked);
+    m_cmbModel->setEnabled(!checked);
+}
+
+void TranslatorSettingsDialog::onBrowseCustomModel()
+{
+    QString filePath = QFileDialog::getOpenFileName(
+        this,
+        "Seleccionar Modelo Whisper",
+        m_txtCustomModelPath->text(),
+        "Modelos GGML (*.bin *.gguf);;Todos los archivos (*.*)");
+
+    if (!filePath.isEmpty()) {
+        m_txtCustomModelPath->setText(filePath);
+    }
+}
+
+void TranslatorSettingsDialog::onRemoteModeToggled(bool checked)
+{
+    m_tabWidget->setTabEnabled(0, true);
+    m_tabWidget->setTabEnabled(1, true);
+}
+
+void TranslatorSettingsDialog::loadCurrentSettings()
+{
+    obs_source_t *source = get_active_filter_source();
+    if (!source) return;
+
+    obs_data_t *settings = obs_source_get_settings(source);
+    if (!settings) return;
+
+    m_chkUseRemote->setChecked(obs_data_get_bool(settings, "use_remote_transcription"));
+    m_txtWsUrl->setText(obs_data_get_string(settings, "ws_url"));
+    m_txtWsToken->setText(obs_data_get_string(settings, "ws_token"));
+
+    const char *mode = obs_data_get_string(settings, "partial_mode");
+    int mode_idx = m_cmbPartialMode->findData(mode ? mode : "realtime");
+    if (mode_idx >= 0) m_cmbPartialMode->setCurrentIndex(mode_idx);
+
+    const char *model = obs_data_get_string(settings, "model_settings");
+    int model_idx = m_cmbModel->findData(model ? model : "ggml-base.bin");
+    if (model_idx >= 0) m_cmbModel->setCurrentIndex(model_idx);
+
+    bool use_custom = obs_data_get_bool(settings, "use_custom_model");
+    m_chkUseCustomModel->setChecked(use_custom);
+    m_widgetCustomModel->setVisible(use_custom);
+    m_cmbModel->setEnabled(!use_custom);
+    m_txtCustomModelPath->setText(obs_data_get_string(settings, "custom_model_path"));
+
+    m_chkUseGpu->setChecked(obs_data_get_bool(settings, "processing_mode"));
+    m_spnThreads->setValue((int)obs_data_get_int(settings, "threads"));
+
+    const char *lang_in = obs_data_get_string(settings, "lang_in");
+    int in_idx = m_cmbLangIn->findData(lang_in ? lang_in : "auto");
+    if (in_idx >= 0) m_cmbLangIn->setCurrentIndex(in_idx);
+
+    const char *lang_out = obs_data_get_string(settings, "lang_out");
+    int out_idx = m_cmbLangOut->findData(lang_out ? lang_out : "original");
+    if (out_idx >= 0) m_cmbLangOut->setCurrentIndex(out_idx);
+
+    m_spnVadThreshold->setValue(obs_data_get_double(settings, "silence_threshold"));
+    m_spnMinSpeechMs->setValue((int)obs_data_get_int(settings, "min_speech_ms"));
+    m_spnHangoverMs->setValue((int)obs_data_get_int(settings, "hangover_ms"));
+
+    obs_data_release(settings);
+}
+
+void TranslatorSettingsDialog::onSaveClicked()
+{
+    saveSettings();
+    accept();
+}
+
+void TranslatorSettingsDialog::saveSettings()
+{
+    obs_source_t *source = get_active_filter_source();
+    if (!source) return;
+
+    obs_data_t *settings = obs_source_get_settings(source);
+    if (!settings) return;
+
+    obs_data_set_bool(settings, "use_remote_transcription", m_chkUseRemote->isChecked());
+    obs_data_set_string(settings, "ws_url", m_txtWsUrl->text().trimmed().toUtf8().constData());
+    obs_data_set_string(settings, "ws_token", m_txtWsToken->text().trimmed().toUtf8().constData());
+    obs_data_set_string(settings, "partial_mode", m_cmbPartialMode->currentData().toString().toUtf8().constData());
+
+    obs_data_set_string(settings, "model_settings", m_cmbModel->currentData().toString().toUtf8().constData());
+    obs_data_set_bool(settings, "use_custom_model", m_chkUseCustomModel->isChecked());
+    obs_data_set_string(settings, "custom_model_path", m_txtCustomModelPath->text().trimmed().toUtf8().constData());
+
+    obs_data_set_bool(settings, "processing_mode", m_chkUseGpu->isChecked());
+    obs_data_set_int(settings, "threads", m_spnThreads->value());
+
+    obs_data_set_string(settings, "lang_in", m_cmbLangIn->currentData().toString().toUtf8().constData());
+    obs_data_set_string(settings, "lang_out", m_cmbLangOut->currentData().toString().toUtf8().constData());
+
+    obs_data_set_double(settings, "silence_threshold", m_spnVadThreshold->value());
+    obs_data_set_int(settings, "min_speech_ms", m_spnMinSpeechMs->value());
+    obs_data_set_int(settings, "hangover_ms", m_spnHangoverMs->value());
+
+    obs_source_update(source, settings);
+    obs_data_release(settings);
+}

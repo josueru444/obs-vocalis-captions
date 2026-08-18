@@ -9,6 +9,7 @@
 #include <util/dstr.h>
 #include <obs.hpp>
 
+#include "ui/translator_ui.h"
 #include "subtitle_animator.h"
 #include <string.h>
 #include <thread>
@@ -110,7 +111,11 @@ struct ai_filter_data {
 	std::string partial_mode{"balanced"};
 
 	bool was_skipping{false};
+	std::atomic<bool> is_paused{false};
 };
+
+static std::mutex s_filters_mutex;
+static std::vector<ai_filter_data*> s_active_filters;
 
 	// Construct WebSocket URL with parameters
 static std::string build_full_ws_url(const std::string &url, const std::string &token, const std::string &lang_in, const std::string &lang_out, const std::string &show_partial)
@@ -518,6 +523,81 @@ static bool on_connect_clicked(obs_properties_t *props, obs_property_t *p, void 
 	return true; // Force UI refresh
 }
 
+// Exported getter for the Qt UI
+std::string get_filter_connection_status(void* data) {
+	ai_filter_data* fd = static_cast<ai_filter_data*>(data);
+	if (!fd) return "Desconocido";
+	std::lock_guard<std::mutex> lock(fd->status_mutex);
+	return fd->connection_status;
+}
+
+FilterStatusInfo get_active_filter_status() {
+	FilterStatusInfo info;
+	std::lock_guard<std::mutex> lock(s_filters_mutex);
+	if (s_active_filters.empty() || !s_active_filters.front()) {
+		info.has_active_filter = false;
+		return info;
+	}
+
+	ai_filter_data* fd = s_active_filters.front();
+	info.has_active_filter = true;
+	info.is_remote = fd->use_remote_transcription;
+	{
+		std::lock_guard<std::mutex> slock(fd->status_mutex);
+		info.connection_status = fd->connection_status;
+	}
+	info.server_url = fd->ws_url;
+	info.in_speech = fd->vad.speaking;
+	info.input_lang = fd->current_language.empty() ? "auto" : fd->current_language;
+	info.target_lang = fd->target_language.empty() ? "en" : fd->target_language;
+	info.is_paused = fd->is_paused.load();
+	info.source_context = fd->context;
+	return info;
+}
+
+void trigger_active_filter_reconnect() {
+	std::lock_guard<std::mutex> lock(s_filters_mutex);
+	if (!s_active_filters.empty() && s_active_filters.front()) {
+		ai_filter_data* fd = s_active_filters.front();
+		if (fd->use_remote_transcription && fd->remote_client) {
+			blog(LOG_INFO, "[AI Translator] Triggering manual reconnect from UI...");
+			std::string full_url = build_full_ws_url(fd->ws_url, fd->ws_token,
+			                                         fd->current_language, fd->target_language, "true");
+			{
+				std::lock_guard<std::mutex> slock(fd->status_mutex);
+				fd->connection_status = "🟡 Conectando...";
+			}
+			fd->remote_client->update_url(full_url);
+		}
+	}
+}
+
+void toggle_active_filter_pause() {
+	std::lock_guard<std::mutex> lock(s_filters_mutex);
+	if (!s_active_filters.empty() && s_active_filters.front()) {
+		ai_filter_data* fd = s_active_filters.front();
+		bool current = fd->is_paused.load();
+		fd->is_paused.store(!current);
+		blog(LOG_INFO, "[AI Translator] Filter translation %s from UI", !current ? "PAUSED" : "RESUMED");
+	}
+}
+
+obs_source_t* get_active_filter_source() {
+	std::lock_guard<std::mutex> lock(s_filters_mutex);
+	if (!s_active_filters.empty() && s_active_filters.front()) {
+		return s_active_filters.front()->context;
+	}
+	return nullptr;
+}
+
+// Handle open UI button
+static bool on_open_ui_clicked(obs_properties_t *props, obs_property_t *p, void *data) {
+	ai_filter_data *fd = static_cast<ai_filter_data *>(data);
+	TranslatorUI ui(fd);
+	ui.exec();
+	return false;
+}
+
 // Handle remote transcription toggle event
 static bool on_remote_transcription_toggled(obs_properties_t *props, obs_property_t *p,
                                              obs_data_t *settings)
@@ -540,6 +620,7 @@ obs_properties_t *ai_filter_get_properties(void *data)
 	(void)data;
 	obs_properties_t *props = obs_properties_create();
 
+	obs_properties_add_button(props, "open_qt_ui", "Abrir Interfaz de Traducción (Qt)", on_open_ui_clicked);
 
 	// ── Group 1: Local Transcription Engine (Whisper) ─────────────────────────
 	obs_properties_t *group_model = obs_properties_create();
@@ -770,9 +851,16 @@ static void ai_filter_update(void *data, obs_data_t *settings)
 	bool mode_changed = has_backend && (new_use_remote != old_use_remote);
 	bool path_changed = has_backend && !new_use_remote && (new_path != old_path);
 
-	// If remote mode is active and only URL/Token changed, just save the values.
-	// The user must press the "Conectar" button to apply the new URL.
+	// If remote mode is active and URL, token, or language parameters changed, update the remote client immediately.
 	if (has_backend && !mode_changed && new_use_remote && fd->remote_client) {
+		if (new_full_url != old_full_url) {
+			blog(LOG_INFO, "[AI Translator] Remote URL updated -> %s", new_full_url.c_str());
+			{
+				std::lock_guard<std::mutex> slock(fd->status_mutex);
+				fd->connection_status = "🟡 Conectando...";
+			}
+			fd->remote_client->update_url(new_full_url);
+		}
 		return;
 	}
 
@@ -948,8 +1036,13 @@ static void *ai_filter_create(obs_data_t *settings, obs_source_t *source)
 		blog(LOG_WARNING, "[AI Translator] Failed to load Silero VAD model. Using RMS fallback.");
 	}
 
-	// Start worker thread AFTER VAD initialization to avoid race conditions
+	// Spawn worker thread for asynchronous transcription
 	data->worker_thread = std::thread(transcription_worker, data);
+
+	{
+		std::lock_guard<std::mutex> lock(s_filters_mutex);
+		s_active_filters.push_back(data);
+	}
 
 	data->vad.speech_frames.reserve(16000 * 30);
 	data->vad.preroll.reserve(16000);
@@ -965,6 +1058,14 @@ static void *ai_filter_create(obs_data_t *settings, obs_source_t *source)
 static void ai_filter_destroy(void *data)
 {
 	ai_filter_data *fd = static_cast<ai_filter_data *>(data);
+
+	{
+		std::lock_guard<std::mutex> lock(s_filters_mutex);
+		auto it = std::find(s_active_filters.begin(), s_active_filters.end(), fd);
+		if (it != s_active_filters.end()) {
+			s_active_filters.erase(it);
+		}
+	}
 
 	// 1. Stop worker threads
 	fd->stop_worker.store(true);
@@ -1119,9 +1220,13 @@ static struct obs_audio_data *ai_filter_audio(void *data, struct obs_audio_data 
 			filter_data->was_skipping = should_skip;
 		}
 
-		if (should_skip) {
+		if (should_skip || filter_data->is_paused.load()) {
 			return audio;
 		}
+	}
+
+	if (filter_data->is_paused.load()) {
+		return audio;
 	}
 
 	// Only process if a transcription backend is active
