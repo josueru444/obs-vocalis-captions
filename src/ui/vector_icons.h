@@ -99,27 +99,36 @@ public:
         return QIcon(pixmap);
     }
 
-    static QIcon iconRefresh(const QColor &color = QColor("#cccccc"), int size = 24)
+    static QIcon iconRefresh(const QColor &color = QColor("#e0e0e0"), int size = 24)
     {
-        QPixmap pixmap(size, size);
+        // Render at higher resolution for crisp scaling
+        int renderSize = size < 32 ? size * 2 : size;
+        QPixmap pixmap(renderSize, renderSize);
         pixmap.fill(Qt::transparent);
         QPainter p(&pixmap);
         p.setRenderHint(QPainter::Antialiasing);
 
-        QPen pen(color, 2.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+        qreal s = renderSize;
+        qreal penWidth = qMax(1.8, s * 0.09);
+        QPen pen(color, penWidth, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
         p.setPen(pen);
         p.setBrush(Qt::NoBrush);
 
-        QRectF rect(size * 0.2, size * 0.2, size * 0.6, size * 0.6);
-        p.drawArc(rect, 45 * 16, 270 * 16);
+        qreal margin = s * 0.20;
+        QRectF arcRect(margin, margin, s - 2 * margin, s - 2 * margin);
+        // Draw 270 degree circular arc (from 50 deg to 320 deg)
+        p.drawArc(arcRect, 50 * 16, 270 * 16);
 
-        // Arrow head
+        // Draw distinct triangular arrowhead at the top-right
         p.setPen(Qt::NoPen);
         p.setBrush(QBrush(color));
         QPainterPath arrow;
-        arrow.moveTo(size * 0.72, size * 0.18);
-        arrow.lineTo(size * 0.88, size * 0.35);
-        arrow.lineTo(size * 0.60, size * 0.38);
+        qreal tipX = s * 0.76;
+        qreal tipY = s * 0.28;
+        qreal arrowSize = s * 0.22;
+        arrow.moveTo(tipX, tipY);
+        arrow.lineTo(tipX - arrowSize * 1.1, tipY - arrowSize * 0.6);
+        arrow.lineTo(tipX - arrowSize * 0.5, tipY + arrowSize * 0.7);
         arrow.closeSubpath();
         p.drawPath(arrow);
 
@@ -224,5 +233,64 @@ public:
         p.drawEllipse(QPointF(center, center), coreRadius, coreRadius);
 
         return pixmap;
+    }
+
+    static QIcon iconEye(const QColor &color = QColor("#cccccc"), int size = 24)
+    {
+        int renderSize = size < 32 ? size * 2 : size;
+        QPixmap pixmap(renderSize, renderSize);
+        pixmap.fill(Qt::transparent);
+        QPainter p(&pixmap);
+        p.setRenderHint(QPainter::Antialiasing);
+
+        qreal s = renderSize;
+        QPen pen(color, qMax(1.6, s * 0.08), Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+        p.setPen(pen);
+        p.setBrush(Qt::NoBrush);
+
+        // Eye shape
+        QPainterPath eyePath;
+        eyePath.moveTo(s * 0.15, s * 0.50);
+        eyePath.cubicTo(s * 0.32, s * 0.22, s * 0.68, s * 0.22, s * 0.85, s * 0.50);
+        eyePath.cubicTo(s * 0.68, s * 0.78, s * 0.32, s * 0.78, s * 0.15, s * 0.50);
+        p.drawPath(eyePath);
+
+        // Pupil
+        p.setPen(Qt::NoPen);
+        p.setBrush(QBrush(color));
+        p.drawEllipse(QPointF(s * 0.50, s * 0.50), s * 0.14, s * 0.14);
+
+        return QIcon(pixmap);
+    }
+
+    static QIcon iconEyeOff(const QColor &color = QColor("#cccccc"), int size = 24)
+    {
+        int renderSize = size < 32 ? size * 2 : size;
+        QPixmap pixmap(renderSize, renderSize);
+        pixmap.fill(Qt::transparent);
+        QPainter p(&pixmap);
+        p.setRenderHint(QPainter::Antialiasing);
+
+        qreal s = renderSize;
+        QPen pen(color, qMax(1.6, s * 0.08), Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+        p.setPen(pen);
+        p.setBrush(Qt::NoBrush);
+
+        // Eye shape
+        QPainterPath eyePath;
+        eyePath.moveTo(s * 0.15, s * 0.50);
+        eyePath.cubicTo(s * 0.32, s * 0.22, s * 0.68, s * 0.22, s * 0.85, s * 0.50);
+        eyePath.cubicTo(s * 0.68, s * 0.78, s * 0.32, s * 0.78, s * 0.15, s * 0.50);
+        p.drawPath(eyePath);
+
+        // Small Pupil outline
+        p.drawEllipse(QPointF(s * 0.50, s * 0.50), s * 0.12, s * 0.12);
+
+        // Diagonal slash line
+        QPen slashPen(color, qMax(1.8, s * 0.09), Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+        p.setPen(slashPen);
+        p.drawLine(QPointF(s * 0.20, s * 0.22), QPointF(s * 0.80, s * 0.78));
+
+        return QIcon(pixmap);
     }
 };

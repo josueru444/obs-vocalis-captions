@@ -13,6 +13,7 @@
 #include <QGroupBox>
 #include <QTimer>
 #include <QFrame>
+#include <QSpinBox>
 
 class TranslatorDock : public QWidget {
     Q_OBJECT
@@ -20,6 +21,8 @@ class TranslatorDock : public QWidget {
 public:
     explicit TranslatorDock(QWidget *parent = nullptr);
     ~TranslatorDock() override;
+
+    void refreshAll();
 
 private slots:
     void refreshStatus();
@@ -41,12 +44,17 @@ private slots:
     void onCustomModelPathEditingFinished();
     void onGpuToggled(bool checked);
     void onWsUrlEditingFinished();
+    void onWsTokenEditingFinished();
+    void onAutoClearToggled(bool checked);
+    void onAutoClearSecondsChanged(int val);
 
 private:
     void setupUi();
     void loadSettingsFromFilter();
+    void updateTargetSourceStyle();
     void saveSettingString(const char *key, const QString &val);
     void saveSettingBool(const char *key, bool val);
+    void saveSettingInt(const char *key, int val);
 
     bool m_isUpdatingUi{false};
     void *m_selectedFilterPtr{nullptr};
@@ -67,9 +75,15 @@ private:
     QPushButton *m_btnClear{nullptr};
     QPushButton *m_btnPause{nullptr};
 
-    // 2. Target Subtitle Source
+    // 2. Target Subtitle Source & Display Options
+    QGroupBox *m_grpTarget{nullptr};
     QComboBox *m_cmbTargetSource{nullptr};
     QPushButton *m_btnRefreshSources{nullptr};
+    QLabel *m_lblTargetWarning{nullptr};
+    QCheckBox *m_chkAutoClear{nullptr};
+    QWidget *m_widgetAutoClearTime{nullptr};
+    QSpinBox *m_spnAutoClearSeconds{nullptr};
+    QLabel *m_lblAutoClearHelp{nullptr};
 
     // 3. Languages
     QComboBox *m_cmbLangIn{nullptr};
@@ -83,6 +97,7 @@ private:
     QLabel *m_lblConnectionDot{nullptr};
     QLabel *m_lblConnectionText{nullptr};
     QLineEdit *m_txtWsUrl{nullptr};
+    QLineEdit *m_txtWsToken{nullptr};
     QPushButton *m_btnReconnect{nullptr};
 
     // Local Whisper settings container
@@ -93,6 +108,7 @@ private:
     QLineEdit *m_txtCustomModelPath{nullptr};
     QPushButton *m_btnBrowseModel{nullptr};
     QCheckBox *m_chkGpu{nullptr};
+    QLabel *m_lblGpuNote{nullptr};
 
     // 5. Bottom
     QPushButton *m_btnSettings{nullptr};

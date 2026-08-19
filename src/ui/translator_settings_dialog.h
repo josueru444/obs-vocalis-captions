@@ -27,6 +27,7 @@ private slots:
     void onCustomModelToggled(bool checked);
     void onBrowseCustomModel();
     void onPartialModeChanged(int index);
+    void onAutoClearToggled(bool checked);
 
 private:
     void setupUi();
@@ -57,10 +58,14 @@ private:
     QComboBox *m_cmbLangOut{nullptr};
     QCheckBox *m_chkLocalTranslation{nullptr};
 
-    // Tab 4: VAD / Audio Detection
+    // Tab 4: VAD & Subtitle Display
     QDoubleSpinBox *m_spnVadThreshold{nullptr};
     QSpinBox *m_spnMinSpeechMs{nullptr};
     QSpinBox *m_spnHangoverMs{nullptr};
+    QCheckBox *m_chkAutoClear{nullptr};
+    QWidget *m_widgetAutoClearTime{nullptr};
+    QSpinBox *m_spnAutoClearSeconds{nullptr};
+    QLabel *m_lblAutoClearHelp{nullptr};
 
     // Dialog buttons
     QPushButton *m_btnSave{nullptr};

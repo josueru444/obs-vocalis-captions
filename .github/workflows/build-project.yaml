@@ -277,6 +277,12 @@ jobs:
           "pluginName=${ProductName}" >> $env:GITHUB_OUTPUT
           "pluginVersion=${ProductVersion}" >> $env:GITHUB_OUTPUT
 
+      - name: Install Vulkan SDK 🌋
+        uses: jakoch/install-vulkan-sdk-action@v1.2
+        with:
+          version: latest
+          cache: true
+
       - name: Build Plugin 🧱
         uses: ./.github/actions/build-plugin
         with:

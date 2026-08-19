@@ -9,7 +9,6 @@
 #include <util/dstr.h>
 #include <obs.hpp>
 
-#include "ui/translator_ui.h"
 #include "subtitle_animator.h"
 #include <string.h>
 #include <thread>
@@ -631,10 +630,49 @@ void clear_active_filter_subtitles(void *filter_ptr) {
 	std::lock_guard<std::mutex> lock(s_filters_mutex);
 	ai_filter_data* fd = get_filter_locked(filter_ptr);
 	if (fd) {
-		blog(LOG_INFO, "[AI Translator] Clearing active subtitles from UI...");
+		blog(LOG_INFO, "[AI Translator] Clearing active subtitles and audio queues from UI...");
+
+		// 1. Purge raw PCM queue
+		{
+			std::lock_guard<std::mutex> raw_lock(fd->raw_pcm_mutex);
+			fd->pcm_raw_queue.clear();
+		}
+
+		// 2. Purge segment queue and return buffers to pool
+		{
+			std::lock_guard<std::mutex> q_lock(fd->queue_mutex);
+			while (!fd->segment_queue.empty()) {
+				if (fd->segment_queue.front().audio) {
+					fd->segment_queue.front().audio->clear();
+					std::lock_guard<std::mutex> pool_lock(fd->pool_mutex);
+					fd->buffer_pool.push_back(fd->segment_queue.front().audio);
+				}
+				fd->segment_queue.pop();
+			}
+		}
+
+		// 3. Reset VAD state machine and buffers
+		fd->vad.speaking = false;
+		fd->vad.speech_frames.clear();
+		fd->vad.preroll.clear();
+		fd->vad.overlap_buffer.clear();
+		fd->vad.speech_ms = 0;
+		fd->vad.silence_ms = 0;
+		fd->vad.last_partial_ms = 0;
+		// Advance sentence ID to invalidate any in-flight or delayed server responses
+		fd->vad.sentence_id++;
+
+		// 4. Reset Silero VAD state if active
+		if (fd->vad_ctx) {
+			whisper_vad_reset_state(fd->vad_ctx);
+		}
+
+		// 5. Clear animator display state
 		if (fd->animator) {
 			fd->animator->clear();
 		}
+
+		// 6. Push clear to target subtitle source
 		update_subtitle_source(fd, "", true, (size_t)-1);
 	}
 }
@@ -646,14 +684,6 @@ obs_source_t* get_active_filter_source(void *filter_ptr) {
 		return fd->context;
 	}
 	return nullptr;
-}
-
-// Handle open UI button
-static bool on_open_ui_clicked(obs_properties_t *props, obs_property_t *p, void *data) {
-	ai_filter_data *fd = static_cast<ai_filter_data *>(data);
-	TranslatorUI ui(fd);
-	ui.exec();
-	return false;
 }
 
 // Handle remote transcription toggle event
@@ -668,17 +698,11 @@ static bool on_remote_transcription_toggled(obs_properties_t *props, obs_propert
 	return true;
 }
 
-
-
-// Removed on_create_source_toggled
-
 // Build OBS plugin properties UI
 obs_properties_t *ai_filter_get_properties(void *data)
 {
 	(void)data;
 	obs_properties_t *props = obs_properties_create();
-
-	obs_properties_add_button(props, "open_qt_ui", "Abrir Interfaz de Traducción (Qt)", on_open_ui_clicked);
 
 	// ── Group 1: Local Transcription Engine (Whisper) ─────────────────────────
 	obs_properties_t *group_model = obs_properties_create();
@@ -903,8 +927,10 @@ static void ai_filter_update(void *data, obs_data_t *settings)
 	std::string old_show_partial = "true";
 	std::string old_full_url = build_full_ws_url(fd->ws_url, fd->ws_token, old_lang_in, old_lang_out, old_show_partial);
 	bool old_use_remote = fd->use_remote_transcription;
+	bool old_use_gpu = fd->use_gpu;
 
 	bool new_use_remote = obs_data_get_bool(settings, "use_remote_transcription");
+	bool new_use_gpu = obs_data_get_bool(settings, "processing_mode");
 	std::string new_ws_url = obs_data_get_string(settings, "ws_url");
 	std::string new_ws_token = obs_data_get_string(settings, "ws_token");
 
@@ -913,6 +939,7 @@ static void ai_filter_update(void *data, obs_data_t *settings)
 	// Save updated values in data struct
 	fd->current_model_path = new_path;
 	fd->use_remote_transcription = new_use_remote;
+	fd->use_gpu = new_use_gpu;
 	fd->ws_url = new_ws_url;
 	fd->ws_token = new_ws_token;
 
@@ -920,6 +947,7 @@ static void ai_filter_update(void *data, obs_data_t *settings)
 	bool has_backend = (fd->processor != nullptr || fd->remote_client != nullptr);
 	bool mode_changed = has_backend && (new_use_remote != old_use_remote);
 	bool path_changed = has_backend && !new_use_remote && (new_path != old_path);
+	bool gpu_changed = has_backend && !new_use_remote && (new_use_gpu != old_use_gpu);
 
 	// If remote mode is active and URL, token, or language parameters changed, update the remote client immediately.
 	if (has_backend && !mode_changed && new_use_remote && fd->remote_client) {
@@ -934,11 +962,11 @@ static void ai_filter_update(void *data, obs_data_t *settings)
 		return;
 	}
 
-	if (!has_backend || (!mode_changed && !path_changed))
+	if (!has_backend || (!mode_changed && !path_changed && !gpu_changed))
 		return; // First call or no structural backend change
 
-	blog(LOG_INFO, "[AI Translator] Reconfigure backend (mode=%s, path=%s)",
-	     mode_changed ? "changed" : "-", path_changed ? "changed" : "-");
+	blog(LOG_INFO, "[AI Translator] Reconfigure backend (mode=%s, path=%s, gpu=%s)",
+	     mode_changed ? "changed" : "-", path_changed ? "changed" : "-", gpu_changed ? "changed" : "-");
 
 	// ── 1. Stop worker thread ────────────────────────────────────────────
 	fd->stop_worker.store(true);

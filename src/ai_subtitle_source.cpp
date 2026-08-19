@@ -368,7 +368,7 @@ static bool on_word_wrap_changed(obs_properties_t *props, obs_property_t *p, obs
 	if (fixed_bg_width) {
 		obs_property_set_visible(fixed_bg_width, word_wrap);
 	}
-	return true;
+	return false;
 }
 
 static bool on_style_preset_changed(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
@@ -380,34 +380,14 @@ static bool on_style_preset_changed(obs_properties_t *props, obs_property_t *p, 
 		return false;
 	}
 
-	if (strcmp(preset, "custom") == 0) {
-		// If switching back to "custom", restore the previously saved custom configuration!
-		if (obs_data_get_bool(settings, "_custom_has_backup")) {
-			obs_data_set_int(settings, "text_color", obs_data_get_int(settings, "_custom_text_color"));
-			obs_data_set_bool(settings, "outline", obs_data_get_bool(settings, "_custom_outline"));
-			obs_data_set_int(settings, "outline_size", obs_data_get_int(settings, "_custom_outline_size"));
-			obs_data_set_int(settings, "outline_opacity", obs_data_get_int(settings, "_custom_outline_opacity"));
-			obs_data_set_int(settings, "outline_color", obs_data_get_int(settings, "_custom_outline_color"));
-			obs_data_set_bool(settings, "drop_shadow", obs_data_get_bool(settings, "_custom_drop_shadow"));
-			obs_data_set_int(settings, "bg_color", obs_data_get_int(settings, "_custom_bg_color"));
-			obs_data_set_string(settings, "align", obs_data_get_string(settings, "_custom_align"));
-
-			obs_data_t *custom_font = obs_data_get_obj(settings, "_custom_font");
-			if (custom_font) {
-				obs_data_set_obj(settings, "font", custom_font);
-				obs_data_release(custom_font);
-			}
-			obs_data_set_string(settings, "_prev_preset", "custom");
-			return true;
-		}
-		obs_data_set_string(settings, "_prev_preset", "custom");
+	const char *prev_preset = obs_data_get_string(settings, "_prev_preset");
+	// Only apply preset properties when the user explicitly changes the preset selection
+	if (prev_preset && strcmp(preset, prev_preset) == 0) {
 		return false;
 	}
 
-	// We are selecting a preset (netflix, minimal_pill, anime_fansub, cyberpunk_neon, high_contrast).
-	// If previous state was on custom, save current custom state first!
-	const char *prev_preset = obs_data_get_string(settings, "_prev_preset");
-	if (!prev_preset || strcmp(prev_preset, "custom") == 0 || !obs_data_get_bool(settings, "_custom_has_backup")) {
+	// 1. If transitioning away FROM "custom" to any preset, snapshot all current custom settings
+	if (!prev_preset || strcmp(prev_preset, "custom") == 0) {
 		obs_data_set_int(settings, "_custom_text_color", obs_data_get_int(settings, "text_color"));
 		obs_data_set_bool(settings, "_custom_outline", obs_data_get_bool(settings, "outline"));
 		obs_data_set_int(settings, "_custom_outline_size", obs_data_get_int(settings, "outline_size"));
@@ -424,8 +404,32 @@ static bool on_style_preset_changed(obs_properties_t *props, obs_property_t *p, 
 		}
 		obs_data_set_bool(settings, "_custom_has_backup", true);
 	}
+
 	obs_data_set_string(settings, "_prev_preset", preset);
 
+	// 2. If returning back TO "custom", restore the saved custom snapshot
+	if (strcmp(preset, "custom") == 0) {
+		if (obs_data_get_bool(settings, "_custom_has_backup")) {
+			obs_data_set_int(settings, "text_color", obs_data_get_int(settings, "_custom_text_color"));
+			obs_data_set_bool(settings, "outline", obs_data_get_bool(settings, "_custom_outline"));
+			obs_data_set_int(settings, "outline_size", obs_data_get_int(settings, "_custom_outline_size"));
+			obs_data_set_int(settings, "outline_opacity", obs_data_get_int(settings, "_custom_outline_opacity"));
+			obs_data_set_int(settings, "outline_color", obs_data_get_int(settings, "_custom_outline_color"));
+			obs_data_set_bool(settings, "drop_shadow", obs_data_get_bool(settings, "_custom_drop_shadow"));
+			obs_data_set_int(settings, "bg_color", obs_data_get_int(settings, "_custom_bg_color"));
+			obs_data_set_string(settings, "align", obs_data_get_string(settings, "_custom_align"));
+
+			obs_data_t *custom_font = obs_data_get_obj(settings, "_custom_font");
+			if (custom_font) {
+				obs_data_set_obj(settings, "font", custom_font);
+				obs_data_release(custom_font);
+			}
+			return true; // Reload UI to show restored custom configuration
+		}
+		return false;
+	}
+
+	// 3. Applying selected design preset
 	obs_data_t *font_obj = obs_data_create();
 
 	if (strcmp(preset, "netflix") == 0) {
@@ -615,7 +619,7 @@ static void my_font_update(void *data, obs_data_t *settings)
 	int max_lines = (int)obs_data_get_int(settings, "max_lines");
 	bool bottom_align = obs_data_get_bool(settings, "bottom_align");
 	const char *align_str = obs_data_get_string(settings, "align");
-	std::string align = (align_str && *align_str) ? align_str : "center";
+	std::string align = (align_str && *align_str) ? align_str : "left";
 	// _is_partial is written by the audio filter, not shown in UI
 	bool is_partial = obs_data_get_bool(settings, "_is_partial");
 

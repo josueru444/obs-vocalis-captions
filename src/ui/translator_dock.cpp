@@ -17,16 +17,11 @@ TranslatorDock::TranslatorDock(QWidget *parent)
     : QWidget(parent)
 {
     setupUi();
-
-    refreshFilterList();
-    refreshSourceList();
-    loadSettingsFromFilter();
+    refreshAll();
 
     m_updateTimer = new QTimer(this);
     connect(m_updateTimer, &QTimer::timeout, this, &TranslatorDock::refreshStatus);
     m_updateTimer->start(250);
-
-    refreshStatus();
 }
 
 TranslatorDock::~TranslatorDock()
@@ -34,6 +29,14 @@ TranslatorDock::~TranslatorDock()
     if (m_updateTimer) {
         m_updateTimer->stop();
     }
+}
+
+void TranslatorDock::refreshAll()
+{
+    refreshFilterList();
+    refreshSourceList();
+    loadSettingsFromFilter();
+    refreshStatus();
 }
 
 void TranslatorDock::setupUi()
@@ -86,7 +89,7 @@ void TranslatorDock::setupUi()
     filterRow->addWidget(m_cmbActiveFilter);
 
     m_btnRefreshFilters = new QPushButton(m_grpFilterSelector);
-    m_btnRefreshFilters->setIcon(VectorIcons::iconRefresh(QColor("#b0b0b0"), 14));
+    m_btnRefreshFilters->setIcon(VectorIcons::iconRefresh(QColor("#ffffff"), 16));
     m_btnRefreshFilters->setToolTip("Actualizar lista de micrófonos con filtro");
     m_btnRefreshFilters->setFixedWidth(30);
     connect(m_btnRefreshFilters, &QPushButton::clicked, this, &TranslatorDock::refreshFilterList);
@@ -133,31 +136,66 @@ void TranslatorDock::setupUi()
     layout->addWidget(cardTop);
 
     // ── 2. Group: Subtitle Output Target ────────────────────────────────────
-    QGroupBox *grpTarget = new QGroupBox("Salida de Subtítulos", container);
-    grpTarget->setStyleSheet(groupStyle);
-    QVBoxLayout *targetLayout = new QVBoxLayout(grpTarget);
+    m_grpTarget = new QGroupBox("Salida de Subtítulos", container);
+    m_grpTarget->setStyleSheet(groupStyle);
+    QVBoxLayout *targetLayout = new QVBoxLayout(m_grpTarget);
     targetLayout->setContentsMargins(8, 8, 8, 8);
     targetLayout->setSpacing(4);
 
-    QLabel *lblTargetHelp = new QLabel("Mostrar subtítulos en la fuente:", grpTarget);
+    QLabel *lblTargetHelp = new QLabel("Mostrar subtítulos en la fuente:", m_grpTarget);
     lblTargetHelp->setStyleSheet("color: #8c92a4; font-size: 8.5pt; font-weight: normal;");
     targetLayout->addWidget(lblTargetHelp);
 
     QHBoxLayout *targetComboRow = new QHBoxLayout();
-    m_cmbTargetSource = new QComboBox(grpTarget);
+    m_cmbTargetSource = new QComboBox(m_grpTarget);
     m_cmbTargetSource->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     connect(m_cmbTargetSource, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &TranslatorDock::onTargetSourceChanged);
     targetComboRow->addWidget(m_cmbTargetSource);
 
-    m_btnRefreshSources = new QPushButton(grpTarget);
-    m_btnRefreshSources->setIcon(VectorIcons::iconRefresh(QColor("#b0b0b0"), 14));
+    m_btnRefreshSources = new QPushButton(m_grpTarget);
+    m_btnRefreshSources->setIcon(VectorIcons::iconRefresh(QColor("#ffffff"), 16));
     m_btnRefreshSources->setToolTip("Actualizar lista de fuentes");
     m_btnRefreshSources->setFixedWidth(30);
     connect(m_btnRefreshSources, &QPushButton::clicked, this, &TranslatorDock::refreshSourceList);
     targetComboRow->addWidget(m_btnRefreshSources);
 
     targetLayout->addLayout(targetComboRow);
-    layout->addWidget(grpTarget);
+
+    m_lblTargetWarning = new QLabel("⚠️ Seleccione una fuente de salida para mostrar los subtítulos.", m_grpTarget);
+    m_lblTargetWarning->setStyleSheet("color: #f39c12; font-size: 8pt; font-weight: 600; padding-top: 2px;");
+    m_lblTargetWarning->setWordWrap(true);
+    m_lblTargetWarning->setVisible(false);
+    targetLayout->addWidget(m_lblTargetWarning);
+
+    // Auto-clear options
+    m_chkAutoClear = new QCheckBox("Ocultar subtítulos automáticamente", m_grpTarget);
+    connect(m_chkAutoClear, &QCheckBox::toggled, this, &TranslatorDock::onAutoClearToggled);
+    targetLayout->addWidget(m_chkAutoClear);
+
+    m_widgetAutoClearTime = new QWidget(m_grpTarget);
+    QHBoxLayout *autoClearTimeLayout = new QHBoxLayout(m_widgetAutoClearTime);
+    autoClearTimeLayout->setContentsMargins(18, 0, 0, 0);
+    autoClearTimeLayout->setSpacing(6);
+
+    QLabel *lblAutoClearSecs = new QLabel("Tiempo tras silencio:", m_widgetAutoClearTime);
+    lblAutoClearSecs->setStyleSheet("color: #8c92a4; font-size: 8.5pt;");
+    autoClearTimeLayout->addWidget(lblAutoClearSecs);
+
+    m_spnAutoClearSeconds = new QSpinBox(m_widgetAutoClearTime);
+    m_spnAutoClearSeconds->setRange(1, 60);
+    m_spnAutoClearSeconds->setValue(5);
+    m_spnAutoClearSeconds->setSuffix(" seg");
+    m_spnAutoClearSeconds->setToolTip("Segundos que permanecerán visibles los subtítulos antes de ocultarse");
+    connect(m_spnAutoClearSeconds, QOverload<int>::of(&QSpinBox::valueChanged), this, &TranslatorDock::onAutoClearSecondsChanged);
+    autoClearTimeLayout->addWidget(m_spnAutoClearSeconds);
+    targetLayout->addWidget(m_widgetAutoClearTime);
+
+    m_lblAutoClearHelp = new QLabel("Los subtítulos permanecerán siempre visibles en pantalla (nunca se ocultan automáticamente).", m_grpTarget);
+    m_lblAutoClearHelp->setStyleSheet("color: #8c92a4; font-size: 8pt; font-style: italic; padding-left: 4px;");
+    m_lblAutoClearHelp->setWordWrap(true);
+    targetLayout->addWidget(m_lblAutoClearHelp);
+
+    layout->addWidget(m_grpTarget);
 
     // ── 3. Group: Languages ─────────────────────────────────────────────────
     QGroupBox *grpLanguages = new QGroupBox("Idiomas", container);
@@ -209,7 +247,7 @@ void TranslatorDock::setupUi()
     connect(m_cmbEngineMode, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &TranslatorDock::onEngineModeChanged);
     engineLayout->addWidget(m_cmbEngineMode);
 
-    // Subpanel: Servidor Remoto
+    // Subpanel: Remote Server
     m_panelRemote = new QFrame(grpEngine);
     m_panelRemote->setStyleSheet("QFrame { background-color: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 5px; padding: 6px; }");
     QVBoxLayout *remoteSubLayout = new QVBoxLayout(m_panelRemote);
@@ -238,8 +276,26 @@ void TranslatorDock::setupUi()
     connect(m_txtWsUrl, &QLineEdit::editingFinished, this, &TranslatorDock::onWsUrlEditingFinished);
     remoteSubLayout->addWidget(m_txtWsUrl);
 
+    m_txtWsToken = new QLineEdit(m_panelRemote);
+    m_txtWsToken->setEchoMode(QLineEdit::Password);
+    m_txtWsToken->setPlaceholderText("Token de autenticación (Opcional)...");
+    connect(m_txtWsToken, &QLineEdit::editingFinished, this, &TranslatorDock::onWsTokenEditingFinished);
+
+    QAction *actionToggleToken = m_txtWsToken->addAction(VectorIcons::iconEye(QColor("#a0a0a0"), 16), QLineEdit::TrailingPosition);
+    actionToggleToken->setToolTip("Mostrar / Ocultar token");
+    connect(actionToggleToken, &QAction::triggered, this, [this, actionToggleToken]() {
+        if (m_txtWsToken->echoMode() == QLineEdit::Password) {
+            m_txtWsToken->setEchoMode(QLineEdit::Normal);
+            actionToggleToken->setIcon(VectorIcons::iconEyeOff(QColor("#ffffff"), 16));
+        } else {
+            m_txtWsToken->setEchoMode(QLineEdit::Password);
+            actionToggleToken->setIcon(VectorIcons::iconEye(QColor("#a0a0a0"), 16));
+        }
+    });
+    remoteSubLayout->addWidget(m_txtWsToken);
+
     m_btnReconnect = new QPushButton("Reconectar Servidor", m_panelRemote);
-    m_btnReconnect->setIcon(VectorIcons::iconRefresh(QColor("#e0e0e0"), 13));
+    m_btnReconnect->setIcon(VectorIcons::iconRefresh(QColor("#ffffff"), 16));
     m_btnReconnect->setStyleSheet("QPushButton { padding: 4px 8px; font-weight: 600; }");
     connect(m_btnReconnect, &QPushButton::clicked, this, &TranslatorDock::onReconnect);
     remoteSubLayout->addWidget(m_btnReconnect);
@@ -290,6 +346,11 @@ void TranslatorDock::setupUi()
     m_chkGpu = new QCheckBox("Aceleración por GPU (Vulkan)", m_panelLocal);
     connect(m_chkGpu, &QCheckBox::toggled, this, &TranslatorDock::onGpuToggled);
     localSubLayout->addWidget(m_chkGpu);
+
+    m_lblGpuNote = new QLabel("Nota: Si experimenta anomalías al alternar GPU, se recomienda reiniciar OBS.", m_panelLocal);
+    m_lblGpuNote->setStyleSheet("color: #8c92a4; font-size: 8pt; font-style: italic;");
+    m_lblGpuNote->setWordWrap(true);
+    localSubLayout->addWidget(m_lblGpuNote);
 
     engineLayout->addWidget(m_panelLocal);
 
@@ -356,7 +417,24 @@ void TranslatorDock::onActiveFilterChanged(int index)
 void TranslatorDock::refreshSourceList()
 {
     m_isUpdatingUi = true;
-    QString currentSelection = m_cmbTargetSource->currentData().toString();
+
+    // Determine target to select from filter settings first
+    QString targetToSelect;
+    obs_source_t *filterSource = get_active_filter_source(m_selectedFilterPtr);
+    if (filterSource) {
+        obs_data_t *settings = obs_source_get_settings(filterSource);
+        if (settings) {
+            const char *saved_target = obs_data_get_string(settings, "target_source_name");
+            if (saved_target && saved_target[0] != '\0') {
+                targetToSelect = QString::fromUtf8(saved_target);
+            }
+            obs_data_release(settings);
+        }
+    }
+
+    if (targetToSelect.isEmpty()) {
+        targetToSelect = m_cmbTargetSource->currentData().toString();
+    }
 
     m_cmbTargetSource->clear();
     m_cmbTargetSource->addItem("(Desactivado / No seleccionado)", "");
@@ -376,24 +454,39 @@ void TranslatorDock::refreshSourceList()
         m_cmbTargetSource);
 
     // Restore selection or load from filter
-    int idx = m_cmbTargetSource->findData(currentSelection);
+    int idx = -1;
+    if (!targetToSelect.isEmpty()) {
+        idx = m_cmbTargetSource->findData(targetToSelect);
+    }
+
     if (idx >= 0) {
         m_cmbTargetSource->setCurrentIndex(idx);
     } else {
-        obs_source_t *source = get_active_filter_source(m_selectedFilterPtr);
-        if (source) {
-            obs_data_t *settings = obs_source_get_settings(source);
-            if (settings) {
-                const char *saved_target = obs_data_get_string(settings, "target_source_name");
-                int saved_idx = m_cmbTargetSource->findData(saved_target ? saved_target : "");
-                if (saved_idx >= 0) {
-                    m_cmbTargetSource->setCurrentIndex(saved_idx);
-                }
-                obs_data_release(settings);
-            }
-        }
+        m_cmbTargetSource->setCurrentIndex(0);
     }
+
+    updateTargetSourceStyle();
     m_isUpdatingUi = false;
+}
+
+void TranslatorDock::updateTargetSourceStyle()
+{
+    bool hasTarget = !m_cmbTargetSource->currentData().toString().isEmpty();
+    if (!hasTarget) {
+        m_cmbTargetSource->setStyleSheet(
+            "QComboBox {"
+            "  border: 1.5px solid #f39c12;"
+            "  background-color: rgba(243, 156, 18, 0.12);"
+            "  color: #f8c268;"
+            "  border-radius: 4px;"
+            "  padding: 3px 6px;"
+            "}"
+        );
+        if (m_lblTargetWarning) m_lblTargetWarning->setVisible(true);
+    } else {
+        m_cmbTargetSource->setStyleSheet("");
+        if (m_lblTargetWarning) m_lblTargetWarning->setVisible(false);
+    }
 }
 
 void TranslatorDock::loadSettingsFromFilter()
@@ -412,10 +505,18 @@ void TranslatorDock::loadSettingsFromFilter()
     m_panelRemote->setVisible(use_remote);
     m_panelLocal->setVisible(!use_remote);
 
-    // Target Source
+    // Target Source: ensure sources list is populated and select saved target
     const char *target = obs_data_get_string(settings, "target_source_name");
-    int target_idx = m_cmbTargetSource->findData(target ? target : "");
-    if (target_idx >= 0) m_cmbTargetSource->setCurrentIndex(target_idx);
+    QString targetName = target ? QString::fromUtf8(target) : "";
+    int target_idx = targetName.isEmpty() ? 0 : m_cmbTargetSource->findData(targetName);
+    if (target_idx < 0) {
+        m_isUpdatingUi = false;
+        refreshSourceList();
+        m_isUpdatingUi = true;
+    } else {
+        m_cmbTargetSource->setCurrentIndex(target_idx);
+        updateTargetSourceStyle();
+    }
 
     // Languages
     const char *lang_in = obs_data_get_string(settings, "lang_in");
@@ -429,6 +530,9 @@ void TranslatorDock::loadSettingsFromFilter()
     // Remote
     if (!m_txtWsUrl->hasFocus()) {
         m_txtWsUrl->setText(obs_data_get_string(settings, "ws_url"));
+    }
+    if (m_txtWsToken && !m_txtWsToken->hasFocus()) {
+        m_txtWsToken->setText(obs_data_get_string(settings, "ws_token"));
     }
 
     // Local
@@ -446,6 +550,26 @@ void TranslatorDock::loadSettingsFromFilter()
     }
 
     m_chkGpu->setChecked(obs_data_get_bool(settings, "processing_mode"));
+
+    // Auto-clear
+    int autoClearSecs = (int)obs_data_get_int(settings, "auto_clear_seconds");
+    if (m_chkAutoClear && m_spnAutoClearSeconds) {
+        if (autoClearSecs <= 0) {
+            m_chkAutoClear->setChecked(false);
+            if (m_widgetAutoClearTime) m_widgetAutoClearTime->setVisible(false);
+            m_spnAutoClearSeconds->setValue(5);
+            if (m_lblAutoClearHelp) {
+                m_lblAutoClearHelp->setText("Los subtítulos permanecerán siempre visibles en pantalla (nunca se ocultan automáticamente).");
+            }
+        } else {
+            m_chkAutoClear->setChecked(true);
+            if (m_widgetAutoClearTime) m_widgetAutoClearTime->setVisible(true);
+            m_spnAutoClearSeconds->setValue(autoClearSecs);
+            if (m_lblAutoClearHelp) {
+                m_lblAutoClearHelp->setText(QString("Se ocultarán tras %1 segundos de silencio.").arg(autoClearSecs));
+            }
+        }
+    }
 
     m_isUpdatingUi = false;
     obs_data_release(settings);
@@ -479,10 +603,58 @@ void TranslatorDock::saveSettingBool(const char *key, bool val)
     obs_data_release(settings);
 }
 
+void TranslatorDock::saveSettingInt(const char *key, int val)
+{
+    if (m_isUpdatingUi) return;
+    obs_source_t *source = get_active_filter_source(m_selectedFilterPtr);
+    if (!source) return;
+
+    obs_data_t *settings = obs_source_get_settings(source);
+    if (!settings) return;
+
+    obs_data_set_int(settings, key, val);
+    obs_source_update(source, settings);
+    obs_data_release(settings);
+}
+
 void TranslatorDock::onTargetSourceChanged(int index)
 {
     if (index >= 0) {
         saveSettingString("target_source_name", m_cmbTargetSource->itemData(index).toString());
+    }
+    updateTargetSourceStyle();
+}
+
+void TranslatorDock::onAutoClearToggled(bool checked)
+{
+    if (m_widgetAutoClearTime) {
+        m_widgetAutoClearTime->setVisible(checked);
+    }
+    if (!checked) {
+        if (m_lblAutoClearHelp) {
+            m_lblAutoClearHelp->setText("Los subtítulos permanecerán siempre visibles en pantalla (nunca se ocultan automáticamente).");
+        }
+        saveSettingInt("auto_clear_seconds", 0);
+    } else {
+        int val = m_spnAutoClearSeconds ? m_spnAutoClearSeconds->value() : 5;
+        if (val <= 0) {
+            val = 5;
+            if (m_spnAutoClearSeconds) m_spnAutoClearSeconds->setValue(5);
+        }
+        if (m_lblAutoClearHelp) {
+            m_lblAutoClearHelp->setText(QString("Se ocultarán tras %1 segundos de silencio.").arg(val));
+        }
+        saveSettingInt("auto_clear_seconds", val);
+    }
+}
+
+void TranslatorDock::onAutoClearSecondsChanged(int val)
+{
+    if (m_chkAutoClear && m_chkAutoClear->isChecked()) {
+        if (m_lblAutoClearHelp) {
+            m_lblAutoClearHelp->setText(QString("Se ocultarán tras %1 segundos de silencio.").arg(val));
+        }
+        saveSettingInt("auto_clear_seconds", val);
     }
 }
 
@@ -543,6 +715,13 @@ void TranslatorDock::onWsUrlEditingFinished()
     saveSettingString("ws_url", m_txtWsUrl->text().trimmed());
 }
 
+void TranslatorDock::onWsTokenEditingFinished()
+{
+    if (m_txtWsToken) {
+        saveSettingString("ws_token", m_txtWsToken->text().trimmed());
+    }
+}
+
 void TranslatorDock::refreshStatus()
 {
     FilterStatusInfo info = get_active_filter_status(m_selectedFilterPtr);
@@ -564,8 +743,9 @@ void TranslatorDock::refreshStatus()
     }
 
     if (filterSourceChanged) {
-        refreshFilterList();
-        loadSettingsFromFilter();
+        refreshAll();
+    } else if (m_cmbTargetSource->count() <= 1) {
+        refreshSourceList();
     }
 
     m_lblWarning->setVisible(false);
@@ -630,6 +810,9 @@ void TranslatorDock::onClearSubtitles()
 void TranslatorDock::onReconnect()
 {
     saveSettingString("ws_url", m_txtWsUrl->text().trimmed());
+    if (m_txtWsToken) {
+        saveSettingString("ws_token", m_txtWsToken->text().trimmed());
+    }
     trigger_active_filter_reconnect(m_selectedFilterPtr);
     refreshStatus();
 }
@@ -646,10 +829,11 @@ void TranslatorDock::onOpenSettings()
 static void frontend_event_handler(enum obs_frontend_event event, void *private_data)
 {
     (void)private_data;
-    if (event == OBS_FRONTEND_EVENT_FINISHED_LOADING) {
-        if (!s_translator_dock) {
-            s_translator_dock = new TranslatorDock();
-            obs_frontend_add_dock_by_id("ai_translator_dock", "Traductor IA", s_translator_dock);
+    if (event == OBS_FRONTEND_EVENT_FINISHED_LOADING ||
+        event == OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGED ||
+        event == OBS_FRONTEND_EVENT_PROFILE_CHANGED) {
+        if (s_translator_dock) {
+            s_translator_dock->refreshAll();
         }
     }
 }
@@ -664,11 +848,17 @@ static void open_settings_tools_cb(void *private_data)
 
 extern "C" void init_translator_dock(void)
 {
+    QMainWindow *main_window = (QMainWindow *)obs_frontend_get_main_window();
+    if (!s_translator_dock) {
+        s_translator_dock = new TranslatorDock(main_window);
+        obs_frontend_add_dock_by_id("ai_translator_dock", "Traductor IA", s_translator_dock);
+    }
     obs_frontend_add_event_callback(frontend_event_handler, nullptr);
     obs_frontend_add_tools_menu_item("Ajustes de Traductor IA...", open_settings_tools_cb, nullptr);
 }
 
 extern "C" void free_translator_dock(void)
 {
+    obs_frontend_remove_event_callback(frontend_event_handler, nullptr);
     s_translator_dock = nullptr;
 }

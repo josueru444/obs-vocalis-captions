@@ -52,6 +52,9 @@ void SubtitleAnimator::clear()
 		m_target_partial_string = "";
 		m_last_update_time = std::chrono::steady_clock::now();
 	}
+	if (m_callback) {
+		m_callback("", false);
+	}
 	m_cv.notify_one();
 }
 

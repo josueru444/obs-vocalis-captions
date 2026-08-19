@@ -16,8 +16,6 @@ include(helpers)
 add_library(${CMAKE_PROJECT_NAME} MODULE
         src/ai_audio_filter.cpp
         src/ai_audio_filter.h
-        src/ui/translator_ui.cpp
-        src/ui/translator_ui.h
         src/ui/translator_dock.cpp
         src/ui/translator_dock.h
         src/ui/vector_icons.h

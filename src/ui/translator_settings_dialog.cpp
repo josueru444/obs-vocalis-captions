@@ -38,6 +38,17 @@ void TranslatorSettingsDialog::setupUi()
     m_txtWsToken = new QLineEdit(this);
     m_txtWsToken->setEchoMode(QLineEdit::Password);
     m_txtWsToken->setPlaceholderText("Opcional");
+    QAction *actionToggleToken = m_txtWsToken->addAction(VectorIcons::iconEye(QColor("#a0a0a0"), 16), QLineEdit::TrailingPosition);
+    actionToggleToken->setToolTip("Mostrar / Ocultar token");
+    connect(actionToggleToken, &QAction::triggered, this, [this, actionToggleToken]() {
+        if (m_txtWsToken->echoMode() == QLineEdit::Password) {
+            m_txtWsToken->setEchoMode(QLineEdit::Normal);
+            actionToggleToken->setIcon(VectorIcons::iconEyeOff(QColor("#ffffff"), 16));
+        } else {
+            m_txtWsToken->setEchoMode(QLineEdit::Password);
+            actionToggleToken->setIcon(VectorIcons::iconEye(QColor("#a0a0a0"), 16));
+        }
+    });
     formRemote->addRow("Token / Clave de Acceso:", m_txtWsToken);
 
     m_cmbPartialMode = new QComboBox(this);
@@ -152,9 +163,42 @@ void TranslatorSettingsDialog::setupUi()
 
     m_tabWidget->addTab(tabLanguages, "Idiomas");
 
-    // ── Tab 4: Detección de Voz (VAD) ───────────────────────────────────────
+    // ── Tab 4: Detección de Voz y Visualización ────────────────────────────
     QWidget *tabVad = new QWidget();
-    QFormLayout *formVad = new QFormLayout(tabVad);
+    QVBoxLayout *vadLayout = new QVBoxLayout(tabVad);
+
+    QGroupBox *grpDisplay = new QGroupBox("Visualización y Permanencia en Pantalla", this);
+    QVBoxLayout *displayLayout = new QVBoxLayout(grpDisplay);
+
+    m_chkAutoClear = new QCheckBox("Ocultar subtítulos automáticamente tras un periodo de silencio", this);
+    connect(m_chkAutoClear, &QCheckBox::toggled, this, &TranslatorSettingsDialog::onAutoClearToggled);
+    displayLayout->addWidget(m_chkAutoClear);
+
+    m_widgetAutoClearTime = new QWidget(this);
+    QHBoxLayout *autoClearTimeLayout = new QHBoxLayout(m_widgetAutoClearTime);
+    autoClearTimeLayout->setContentsMargins(18, 0, 0, 0);
+    autoClearTimeLayout->setSpacing(6);
+
+    QLabel *lblAutoClearSecs = new QLabel("Tiempo de espera antes de ocultar:", m_widgetAutoClearTime);
+    autoClearTimeLayout->addWidget(lblAutoClearSecs);
+
+    m_spnAutoClearSeconds = new QSpinBox(m_widgetAutoClearTime);
+    m_spnAutoClearSeconds->setRange(1, 60);
+    m_spnAutoClearSeconds->setValue(5);
+    m_spnAutoClearSeconds->setSuffix(" seg");
+    autoClearTimeLayout->addWidget(m_spnAutoClearSeconds);
+    autoClearTimeLayout->addStretch();
+    displayLayout->addWidget(m_widgetAutoClearTime);
+
+    m_lblAutoClearHelp = new QLabel("Nota: Si desmarca esta opción (o se establece en 0), los subtítulos permanecerán siempre visibles en pantalla hasta que se detecte una nueva frase o se pulse 'Limpiar'.", this);
+    m_lblAutoClearHelp->setWordWrap(true);
+    m_lblAutoClearHelp->setStyleSheet("color: #7f8c8d; font-size: 8.5pt; margin-top: 4px;");
+    displayLayout->addWidget(m_lblAutoClearHelp);
+
+    vadLayout->addWidget(grpDisplay);
+
+    QGroupBox *grpVad = new QGroupBox("Parámetros de Detección de Voz (VAD)", this);
+    QFormLayout *formVad = new QFormLayout(grpVad);
 
     m_spnVadThreshold = new QDoubleSpinBox(this);
     m_spnVadThreshold->setRange(0.001, 1.0);
@@ -177,7 +221,10 @@ void TranslatorSettingsDialog::setupUi()
     m_spnHangoverMs->setSuffix(" ms");
     formVad->addRow("Margen de silencio tras hablar:", m_spnHangoverMs);
 
-    m_tabWidget->addTab(tabVad, "Detección de Voz (VAD)");
+    vadLayout->addWidget(grpVad);
+    vadLayout->addStretch();
+
+    m_tabWidget->addTab(tabVad, "VAD y Pantalla");
 
     mainLayout->addWidget(m_tabWidget);
 
@@ -223,6 +270,13 @@ void TranslatorSettingsDialog::onRemoteModeToggled(bool checked)
     m_tabWidget->setTabEnabled(1, true);
 }
 
+void TranslatorSettingsDialog::onAutoClearToggled(bool checked)
+{
+    if (m_widgetAutoClearTime) {
+        m_widgetAutoClearTime->setVisible(checked);
+    }
+}
+
 void TranslatorSettingsDialog::onPartialModeChanged(int index)
 {
     bool isCustom = (m_cmbPartialMode->itemData(index).toString() == "custom");
@@ -263,7 +317,7 @@ void TranslatorSettingsDialog::loadCurrentSettings()
     m_txtCustomModelPath->setText(obs_data_get_string(settings, "custom_model_path"));
 
     m_chkUseGpu->setChecked(obs_data_get_bool(settings, "processing_mode"));
-    m_spnThreads->setValue((int)obs_data_get_int(settings, "threads"));
+    m_spnThreads->setValue((int)obs_data_get_int(settings, "whisper_threads"));
 
     const char *lang_in = obs_data_get_string(settings, "lang_in");
     int in_idx = m_cmbLangIn->findData(lang_in ? lang_in : "auto");
@@ -273,9 +327,20 @@ void TranslatorSettingsDialog::loadCurrentSettings()
     int out_idx = m_cmbLangOut->findData(lang_out ? lang_out : "original");
     if (out_idx >= 0) m_cmbLangOut->setCurrentIndex(out_idx);
 
-    m_spnVadThreshold->setValue(obs_data_get_double(settings, "silence_threshold"));
-    m_spnMinSpeechMs->setValue((int)obs_data_get_int(settings, "min_speech_ms"));
-    m_spnHangoverMs->setValue((int)obs_data_get_int(settings, "hangover_ms"));
+    m_spnVadThreshold->setValue(obs_data_get_double(settings, "vad_rms"));
+    m_spnMinSpeechMs->setValue((int)obs_data_get_int(settings, "vad_min_speech"));
+    m_spnHangoverMs->setValue((int)obs_data_get_int(settings, "vad_hangover"));
+
+    int autoClearSecs = (int)obs_data_get_int(settings, "auto_clear_seconds");
+    if (autoClearSecs <= 0) {
+        m_chkAutoClear->setChecked(false);
+        m_widgetAutoClearTime->setVisible(false);
+        m_spnAutoClearSeconds->setValue(5);
+    } else {
+        m_chkAutoClear->setChecked(true);
+        m_widgetAutoClearTime->setVisible(true);
+        m_spnAutoClearSeconds->setValue(autoClearSecs);
+    }
 
     obs_data_release(settings);
 }
@@ -305,14 +370,17 @@ void TranslatorSettingsDialog::saveSettings()
     obs_data_set_string(settings, "custom_model_path", m_txtCustomModelPath->text().trimmed().toUtf8().constData());
 
     obs_data_set_bool(settings, "processing_mode", m_chkUseGpu->isChecked());
-    obs_data_set_int(settings, "threads", m_spnThreads->value());
+    obs_data_set_int(settings, "whisper_threads", m_spnThreads->value());
 
     obs_data_set_string(settings, "lang_in", m_cmbLangIn->currentData().toString().toUtf8().constData());
     obs_data_set_string(settings, "lang_out", m_cmbLangOut->currentData().toString().toUtf8().constData());
 
-    obs_data_set_double(settings, "silence_threshold", m_spnVadThreshold->value());
-    obs_data_set_int(settings, "min_speech_ms", m_spnMinSpeechMs->value());
-    obs_data_set_int(settings, "hangover_ms", m_spnHangoverMs->value());
+    obs_data_set_double(settings, "vad_rms", m_spnVadThreshold->value());
+    obs_data_set_int(settings, "vad_min_speech", m_spnMinSpeechMs->value());
+    obs_data_set_int(settings, "vad_hangover", m_spnHangoverMs->value());
+
+    int autoClearVal = m_chkAutoClear->isChecked() ? m_spnAutoClearSeconds->value() : 0;
+    obs_data_set_int(settings, "auto_clear_seconds", autoClearVal);
 
     obs_source_update(source, settings);
     obs_data_release(settings);
