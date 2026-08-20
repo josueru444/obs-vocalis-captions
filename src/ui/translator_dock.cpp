@@ -1,5 +1,6 @@
 #include "translator_dock.h"
 #include "translator_settings_dialog.h"
+#include "whisper_model_manager.h"
 #include "vector_icons.h"
 #include "../ai_audio_filter.h"
 
@@ -10,6 +11,8 @@
 #include <QFont>
 #include <QFormLayout>
 #include <QFileDialog>
+#include <QProgressBar>
+#include <QMessageBox>
 
 static TranslatorDock *s_translator_dock = nullptr;
 
@@ -17,7 +20,12 @@ TranslatorDock::TranslatorDock(QWidget *parent)
     : QWidget(parent)
 {
     setupUi();
+    updateModelComboList();
     refreshAll();
+
+    connect(&WhisperModelManager::instance(), &WhisperModelManager::modelListChanged, this, &TranslatorDock::updateModelComboList);
+    connect(&WhisperModelManager::instance(), &WhisperModelManager::downloadProgress, this, &TranslatorDock::onModelDownloadProgress);
+    connect(&WhisperModelManager::instance(), &WhisperModelManager::downloadFinished, this, &TranslatorDock::onModelDownloadFinished);
 
     m_updateTimer = new QTimer(this);
     connect(m_updateTimer, &QTimer::timeout, this, &TranslatorDock::refreshStatus);
@@ -314,11 +322,58 @@ void TranslatorDock::setupUi()
     localSubLayout->addWidget(lblModel);
 
     m_cmbModel = new QComboBox(m_panelLocal);
-    m_cmbModel->addItem("Tiny (Rápido y Ligero)", "ggml-tiny.bin");
-    m_cmbModel->addItem("Base (Balanceado)", "ggml-base.bin");
-    m_cmbModel->addItem("Small (Alta Precisión)", "ggml-small.bin");
+    m_cmbModel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     connect(m_cmbModel, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &TranslatorDock::onModelChanged);
     localSubLayout->addWidget(m_cmbModel);
+
+    QHBoxLayout *modelButtonsLayout = new QHBoxLayout();
+    modelButtonsLayout->setContentsMargins(0, 0, 0, 0);
+    modelButtonsLayout->setSpacing(6);
+
+    m_btnDownloadModel = new QPushButton(" Descargar", m_panelLocal);
+    m_btnDownloadModel->setIcon(VectorIcons::iconDownload(QColor("#5B9BD5"), 14));
+    m_btnDownloadModel->setToolTip("Descargar el modelo seleccionado");
+    m_btnDownloadModel->setStyleSheet("QPushButton { padding: 4px 8px; font-size: 8pt; font-weight: 600; }");
+    connect(m_btnDownloadModel, &QPushButton::clicked, this, &TranslatorDock::onDownloadModelClicked);
+    modelButtonsLayout->addWidget(m_btnDownloadModel);
+
+    m_btnDeleteModel = new QPushButton(" Eliminar", m_panelLocal);
+    m_btnDeleteModel->setIcon(VectorIcons::iconTrash(QColor("#E06C75"), 14));
+    m_btnDeleteModel->setToolTip("Eliminar el modelo seleccionado del disco");
+    m_btnDeleteModel->setStyleSheet("QPushButton { padding: 4px 8px; font-size: 8pt; font-weight: 600; color: #E06C75; }");
+    connect(m_btnDeleteModel, &QPushButton::clicked, this, &TranslatorDock::onDeleteModelClicked);
+    modelButtonsLayout->addWidget(m_btnDeleteModel);
+
+    localSubLayout->addLayout(modelButtonsLayout);
+
+    // Download progress bar & cancel widget
+    m_widgetDownloadProgress = new QWidget(m_panelLocal);
+    QVBoxLayout *progressLayout = new QVBoxLayout(m_widgetDownloadProgress);
+    progressLayout->setContentsMargins(0, 2, 0, 2);
+    progressLayout->setSpacing(3);
+
+    QHBoxLayout *progHeader = new QHBoxLayout();
+    m_lblDownloadStatus = new QLabel("Descargando...", m_widgetDownloadProgress);
+    m_lblDownloadStatus->setStyleSheet("color: #5B9BD5; font-size: 8pt; font-weight: bold;");
+    progHeader->addWidget(m_lblDownloadStatus);
+    progHeader->addStretch();
+
+    m_btnCancelDownload = new QPushButton("Cancelar", m_widgetDownloadProgress);
+    m_btnCancelDownload->setStyleSheet("QPushButton { font-size: 7.5pt; padding: 2px 6px; }");
+    connect(m_btnCancelDownload, &QPushButton::clicked, this, &TranslatorDock::onCancelDownloadClicked);
+    progHeader->addWidget(m_btnCancelDownload);
+    progressLayout->addLayout(progHeader);
+
+    m_progressBar = new QProgressBar(m_widgetDownloadProgress);
+    m_progressBar->setRange(0, 100);
+    m_progressBar->setValue(0);
+    m_progressBar->setTextVisible(true);
+    m_progressBar->setFixedHeight(14);
+    m_progressBar->setStyleSheet("QProgressBar { border: 1px solid rgba(255,255,255,0.1); border-radius: 3px; text-align: center; font-size: 7.5pt; } QProgressBar::chunk { background-color: #5B9BD5; }");
+    progressLayout->addWidget(m_progressBar);
+
+    m_widgetDownloadProgress->setVisible(false);
+    localSubLayout->addWidget(m_widgetDownloadProgress);
 
     m_chkUseCustomModel = new QCheckBox("Usar modelo personalizado (.bin)", m_panelLocal);
     connect(m_chkUseCustomModel, &QCheckBox::toggled, this, &TranslatorDock::onUseCustomModelToggled);
@@ -672,10 +727,144 @@ void TranslatorDock::onLanguageChanged()
     saveSettingString("lang_out", m_cmbLangOut->currentData().toString());
 }
 
+void TranslatorDock::updateModelComboList()
+{
+    QString currentSelected = m_cmbModel->currentData().toString();
+    if (currentSelected.isEmpty()) currentSelected = "ggml-base.bin";
+
+    bool oldBlock = m_cmbModel->blockSignals(true);
+    m_cmbModel->clear();
+
+    const auto &models = WhisperModelManager::instance().getModels();
+    for (const auto &m : models) {
+        QIcon icon = m.isDownloaded ? VectorIcons::iconCheck(QColor("#4CAF50"), 16)
+                                    : VectorIcons::iconDownload(QColor("#5B9BD5"), 16);
+        QString statusText = m.isDownloaded ? QString("%1 (%2)  —  Listo").arg(m.name, m.sizeStr)
+                                            : QString("%1 (%2)  —  Descargar").arg(m.name, m.sizeStr);
+        m_cmbModel->addItem(icon, statusText, m.fileName);
+    }
+
+    int idx = m_cmbModel->findData(currentSelected);
+    if (idx >= 0) m_cmbModel->setCurrentIndex(idx);
+    else if (m_cmbModel->count() > 0) m_cmbModel->setCurrentIndex(0);
+
+    m_cmbModel->blockSignals(oldBlock);
+    updateModelActionButtons();
+}
+
+void TranslatorDock::updateModelActionButtons()
+{
+    QString selectedFile = m_cmbModel->currentData().toString();
+    bool isDownloaded = WhisperModelManager::instance().isModelDownloaded(selectedFile);
+    WhisperModelInfo info = WhisperModelManager::instance().getModelInfo(selectedFile);
+
+    if (info.isDownloading) {
+        m_btnDownloadModel->setEnabled(false);
+        m_btnDownloadModel->setText(" Descargando...");
+        m_btnDeleteModel->setEnabled(false);
+    } else {
+        if (isDownloaded) {
+            m_btnDownloadModel->setEnabled(false);
+            m_btnDownloadModel->setText(" Ya Descargado");
+            m_btnDownloadModel->setToolTip("Este modelo ya está descargado y listo para usarse");
+            m_btnDeleteModel->setEnabled(true);
+            m_btnDeleteModel->setToolTip("Eliminar este modelo del disco para liberar espacio");
+        } else {
+            m_btnDownloadModel->setEnabled(true);
+            m_btnDownloadModel->setText(" Descargar");
+            m_btnDownloadModel->setToolTip("Descargar modelo a tu equipo");
+            m_btnDeleteModel->setEnabled(false);
+            m_btnDeleteModel->setToolTip("El modelo no está descargado");
+        }
+    }
+}
+
 void TranslatorDock::onModelChanged(int index)
 {
-    if (index >= 0) {
-        saveSettingString("model_settings", m_cmbModel->itemData(index).toString());
+    if (index >= 0 && !m_isUpdatingUi) {
+        QString model = m_cmbModel->itemData(index).toString();
+        saveSettingString("model_settings", model);
+        updateModelActionButtons();
+    }
+}
+
+void TranslatorDock::onDownloadModelClicked()
+{
+    QString selectedFile = m_cmbModel->currentData().toString();
+    if (selectedFile.isEmpty()) return;
+
+    m_widgetDownloadProgress->setVisible(true);
+    m_progressBar->setValue(0);
+    m_lblDownloadStatus->setText(QString("Iniciando descarga: %1...").arg(selectedFile));
+    WhisperModelManager::instance().startDownload(selectedFile);
+    updateModelActionButtons();
+}
+
+void TranslatorDock::onDeleteModelClicked()
+{
+    QString selectedFile = m_cmbModel->currentData().toString();
+    if (selectedFile.isEmpty()) return;
+
+    WhisperModelInfo info = WhisperModelManager::instance().getModelInfo(selectedFile);
+    QString sizeInfo = info.sizeStr.isEmpty() ? "" : QString(" (%1)").arg(info.sizeStr);
+
+    auto reply = QMessageBox::question(
+        this,
+        "Confirmar Eliminación de Modelo",
+        QString("¿Desea eliminar el modelo '%1'%2 del disco para liberar espacio?\n\nPodrá volver a descargarlo cuando lo necesite.").arg(selectedFile, sizeInfo),
+        QMessageBox::Yes | QMessageBox::No,
+        QMessageBox::No
+    );
+
+    if (reply == QMessageBox::Yes) {
+        bool deleted = WhisperModelManager::instance().deleteModel(selectedFile);
+        WhisperModelManager::instance().refreshModelStatuses();
+        updateModelComboList();
+
+        if (!deleted && WhisperModelManager::instance().isModelDownloaded(selectedFile)) {
+            QMessageBox::warning(
+                this,
+                "No se pudo eliminar",
+                QString("No se pudo eliminar '%1'. Puede ser un modelo base del instalador protegido contra escritura o encontrarse en uso.").arg(selectedFile)
+            );
+        }
+    }
+}
+
+void TranslatorDock::onCancelDownloadClicked()
+{
+    QString selectedFile = m_cmbModel->currentData().toString();
+    WhisperModelManager::instance().cancelDownload(selectedFile);
+    m_widgetDownloadProgress->setVisible(false);
+    updateModelActionButtons();
+}
+
+void TranslatorDock::onModelDownloadProgress(const QString &fileName, qint64 received, qint64 total, int percent)
+{
+    QString currentSelected = m_cmbModel->currentData().toString();
+    if (fileName == currentSelected || m_widgetDownloadProgress->isVisible()) {
+        m_widgetDownloadProgress->setVisible(true);
+        m_progressBar->setValue(percent);
+
+        double recMb = received / (1024.0 * 1024.0);
+        double totMb = total / (1024.0 * 1024.0);
+        m_lblDownloadStatus->setText(QString("Descargando %1: %2 MB / %3 MB (%4%)")
+                                     .arg(fileName)
+                                     .arg(recMb, 0, 'f', 1)
+                                     .arg(totMb, 0, 'f', 1)
+                                     .arg(percent));
+    }
+}
+
+void TranslatorDock::onModelDownloadFinished(const QString &fileName, bool success, const QString &errorMsg)
+{
+    m_widgetDownloadProgress->setVisible(false);
+    updateModelComboList();
+
+    if (success) {
+        saveSettingString("model_settings", fileName);
+    } else if (!errorMsg.isEmpty() && errorMsg != "Descarga cancelada") {
+        QMessageBox::warning(this, "Error de descarga", QString("No se pudo descargar %1:\n%2").arg(fileName, errorMsg));
     }
 }
 

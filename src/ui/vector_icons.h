@@ -293,4 +293,89 @@ public:
 
         return QIcon(pixmap);
     }
+
+    static QIcon iconCheck(const QColor &color = QColor("#4CAF50"), int size = 24)
+    {
+        int renderSize = size < 32 ? size * 2 : size;
+        QPixmap pixmap(renderSize, renderSize);
+        pixmap.fill(Qt::transparent);
+        QPainter p(&pixmap);
+        p.setRenderHint(QPainter::Antialiasing);
+
+        qreal s = renderSize;
+        QPen pen(color, qMax(2.0, s * 0.12), Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+        p.setPen(pen);
+        p.setBrush(Qt::NoBrush);
+
+        QPainterPath path;
+        path.moveTo(s * 0.22, s * 0.52);
+        path.lineTo(s * 0.42, s * 0.72);
+        path.lineTo(s * 0.78, s * 0.28);
+        p.drawPath(path);
+
+        return QIcon(pixmap);
+    }
+
+    static QIcon iconDownload(const QColor &color = QColor("#5B9BD5"), int size = 24)
+    {
+        int renderSize = size < 32 ? size * 2 : size;
+        QPixmap pixmap(renderSize, renderSize);
+        pixmap.fill(Qt::transparent);
+        QPainter p(&pixmap);
+        p.setRenderHint(QPainter::Antialiasing);
+
+        qreal s = renderSize;
+        QPen pen(color, qMax(1.8, s * 0.09), Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+        p.setPen(pen);
+        p.setBrush(Qt::NoBrush);
+
+        // Arrow shaft
+        p.drawLine(QPointF(s * 0.50, s * 0.18), QPointF(s * 0.50, s * 0.58));
+        // Arrow head
+        QPainterPath head;
+        head.moveTo(s * 0.30, s * 0.42);
+        head.lineTo(s * 0.50, s * 0.62);
+        head.lineTo(s * 0.70, s * 0.42);
+        p.drawPath(head);
+        // Base tray
+        QPainterPath tray;
+        tray.moveTo(s * 0.22, s * 0.70);
+        tray.lineTo(s * 0.22, s * 0.82);
+        tray.lineTo(s * 0.78, s * 0.82);
+        tray.lineTo(s * 0.78, s * 0.70);
+        p.drawPath(tray);
+
+        return QIcon(pixmap);
+    }
+
+    static QIcon iconTrash(const QColor &color = QColor("#E06C75"), int size = 24)
+    {
+        int renderSize = size < 32 ? size * 2 : size;
+        QPixmap pixmap(renderSize, renderSize);
+        pixmap.fill(Qt::transparent);
+        QPainter p(&pixmap);
+        p.setRenderHint(QPainter::Antialiasing);
+
+        qreal s = renderSize;
+        QPen pen(color, qMax(1.6, s * 0.08), Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+        p.setPen(pen);
+        p.setBrush(Qt::NoBrush);
+
+        // Lid handle
+        p.drawLine(QPointF(s * 0.40, s * 0.18), QPointF(s * 0.60, s * 0.18));
+        // Lid bar
+        p.drawLine(QPointF(s * 0.20, s * 0.28), QPointF(s * 0.80, s * 0.28));
+        // Bin body
+        QPainterPath body;
+        body.moveTo(s * 0.28, s * 0.32);
+        body.lineTo(s * 0.32, s * 0.82);
+        body.lineTo(s * 0.68, s * 0.82);
+        body.lineTo(s * 0.72, s * 0.32);
+        p.drawPath(body);
+        // Vertical ribs inside bin
+        p.drawLine(QPointF(s * 0.42, s * 0.42), QPointF(s * 0.42, s * 0.72));
+        p.drawLine(QPointF(s * 0.58, s * 0.42), QPointF(s * 0.58, s * 0.72));
+
+        return QIcon(pixmap);
+    }
 };

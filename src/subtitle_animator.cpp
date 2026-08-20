@@ -41,6 +41,12 @@ void SubtitleAnimator::set_partial_throttle_ms(int ms)
 	m_partial_throttle_ms = ms;
 }
 
+void SubtitleAnimator::set_final_display_lock_ms(int ms)
+{
+	std::lock_guard<std::mutex> lock(m_mutex);
+	m_final_display_lock_ms = ms;
+}
+
 void SubtitleAnimator::clear()
 {
 	{

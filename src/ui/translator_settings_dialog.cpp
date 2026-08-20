@@ -1,5 +1,6 @@
 #include "translator_settings_dialog.h"
 #include "vector_icons.h"
+#include "whisper_model_manager.h"
 #include "../ai_audio_filter.h"
 #include <obs.hpp>
 #include <QMessageBox>
@@ -53,21 +54,29 @@ void TranslatorSettingsDialog::setupUi()
 
     m_cmbPartialMode = new QComboBox(this);
     m_cmbPartialMode->addItem("Tiempo Real (500 ms - Fluidez continua)", "realtime");
-    m_cmbPartialMode->addItem("Balanceado (1000 ms - Recomendado)", "balanced");
-    m_cmbPartialMode->addItem("Alta Precisión (2000 ms - Frases completas)", "precision");
-    m_cmbPartialMode->addItem("Personalizado (Elegir milisegundos)", "custom");
+    m_cmbPartialMode->addItem("Balanceado (900 ms - Recomendado)", "balanced");
+    m_cmbPartialMode->addItem("Alta Precisión (1800 ms - Frases completas)", "precision");
+    m_cmbPartialMode->addItem("Personalizado (Elegir milisegundos - Mín 500 ms)", "custom");
     connect(m_cmbPartialMode, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &TranslatorSettingsDialog::onPartialModeChanged);
     formRemote->addRow("Muestreo de Texto:", m_cmbPartialMode);
 
     m_widgetCustomInterval = new QWidget(this);
     QHBoxLayout *customIntervalLayout = new QHBoxLayout(m_widgetCustomInterval);
     customIntervalLayout->setContentsMargins(0, 0, 0, 0);
+    customIntervalLayout->setSpacing(6);
     m_spnCustomInterval = new QSpinBox(m_widgetCustomInterval);
-    m_spnCustomInterval->setRange(200, 5000);
+    m_spnCustomInterval->setRange(500, 5000);
     m_spnCustomInterval->setSingleStep(50);
-    m_spnCustomInterval->setValue(1500);
+    m_spnCustomInterval->setValue(1000);
     m_spnCustomInterval->setSuffix(" ms");
+    m_spnCustomInterval->setToolTip("Mínimo permitido: 500 ms (protección contra sobrecarga de CPU)");
     customIntervalLayout->addWidget(m_spnCustomInterval);
+
+    QLabel *lblMinInfo = new QLabel("(Mínimo: 500 ms — Máximo: 5000 ms)", m_widgetCustomInterval);
+    lblMinInfo->setStyleSheet("color: #8c92a4; font-size: 8pt; font-style: italic;");
+    customIntervalLayout->addWidget(lblMinInfo);
+    customIntervalLayout->addStretch();
+
     m_widgetCustomInterval->setVisible(false);
     formRemote->addRow("Intervalo Exacto:", m_widgetCustomInterval);
 
@@ -83,9 +92,14 @@ void TranslatorSettingsDialog::setupUi()
     QVBoxLayout *modelLayout = new QVBoxLayout(grpModel);
 
     m_cmbModel = new QComboBox(this);
-    m_cmbModel->addItem("Tiny (Rápido y Ligero)", "ggml-tiny.bin");
-    m_cmbModel->addItem("Base (Balanceado)", "ggml-base.bin");
-    m_cmbModel->addItem("Small (Alta Precisión)", "ggml-small.bin");
+    const auto &models = WhisperModelManager::instance().getModels();
+    for (const auto &m : models) {
+        QIcon icon = m.isDownloaded ? VectorIcons::iconCheck(QColor("#4CAF50"), 16)
+                                    : VectorIcons::iconDownload(QColor("#5B9BD5"), 16);
+        QString statusText = m.isDownloaded ? QString("%1 (%2)  —  Listo").arg(m.name, m.sizeStr)
+                                            : QString("%1 (%2)  —  Descargar").arg(m.name, m.sizeStr);
+        m_cmbModel->addItem(icon, statusText, m.fileName);
+    }
     modelLayout->addWidget(m_cmbModel);
 
     m_chkUseCustomModel = new QCheckBox("Usar modelo personalizado (.bin)", this);
@@ -300,8 +314,9 @@ void TranslatorSettingsDialog::loadCurrentSettings()
     if (mode_idx >= 0) m_cmbPartialMode->setCurrentIndex(mode_idx);
 
     int custom_ms = (int)obs_data_get_int(settings, "custom_partial_interval_ms");
-    if (custom_ms >= 200) m_spnCustomInterval->setValue(custom_ms);
-    else m_spnCustomInterval->setValue(1500);
+    if (custom_ms < 500) custom_ms = 500;
+    if (custom_ms > 5000) custom_ms = 5000;
+    m_spnCustomInterval->setValue(custom_ms);
 
     bool isCustom = (m_cmbPartialMode->currentData().toString() == "custom");
     m_widgetCustomInterval->setVisible(isCustom);
@@ -363,7 +378,10 @@ void TranslatorSettingsDialog::saveSettings()
     obs_data_set_string(settings, "ws_url", m_txtWsUrl->text().trimmed().toUtf8().constData());
     obs_data_set_string(settings, "ws_token", m_txtWsToken->text().trimmed().toUtf8().constData());
     obs_data_set_string(settings, "partial_mode", m_cmbPartialMode->currentData().toString().toUtf8().constData());
-    obs_data_set_int(settings, "custom_partial_interval_ms", m_spnCustomInterval->value());
+    int custom_val = m_spnCustomInterval->value();
+    if (custom_val < 500) custom_val = 500;
+    if (custom_val > 5000) custom_val = 5000;
+    obs_data_set_int(settings, "custom_partial_interval_ms", custom_val);
 
     obs_data_set_string(settings, "model_settings", m_cmbModel->currentData().toString().toUtf8().constData());
     obs_data_set_bool(settings, "use_custom_model", m_chkUseCustomModel->isChecked());

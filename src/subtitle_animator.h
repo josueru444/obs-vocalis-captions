@@ -22,8 +22,9 @@ public:
 	void set_max_lines(size_t lines);
 	void set_auto_clear_seconds(int seconds);
 
-	// Configure partial update throttle in milliseconds
+	// Configure partial update throttle and display lock in milliseconds
 	void set_partial_throttle_ms(int ms);
+	void set_final_display_lock_ms(int ms);
 
 	// Process transcription update
 	void update_text(const std::string &text, bool is_final, size_t sentence_id);

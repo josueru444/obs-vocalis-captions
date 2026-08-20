@@ -7,6 +7,7 @@
 #include <obs-module.h>
 #include <util/threading.h>
 #include <util/dstr.h>
+#include <util/platform.h>
 #include <obs.hpp>
 
 #include "subtitle_animator.h"
@@ -819,20 +820,20 @@ obs_properties_t *ai_filter_get_properties(void *data)
 		obs_properties_add_list(group_partial, "partial_mode",
 		                        "Modo de actualización del texto:",
 		                        OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
-	obs_property_list_add_string(combo_partial, "Tiempo real  —  0.5 segundos (Fluidez continua)", "realtime");
-	obs_property_list_add_string(combo_partial, "Balanceado   —  1.0 segundos (Recomendado)", "balanced");
-	obs_property_list_add_string(combo_partial, "Alta Precisión —  2.0 segundos (Frases completas)", "precision");
-	obs_property_list_add_string(combo_partial, "Personalizado  —  Configurar milisegundos exactos", "custom");
+	obs_property_list_add_string(combo_partial, "Tiempo real  —  500 ms (Fluidez continua)", "realtime");
+	obs_property_list_add_string(combo_partial, "Balanceado   —  900 ms (Recomendado)", "balanced");
+	obs_property_list_add_string(combo_partial, "Alta Precisión —  1800 ms (Frases completas)", "precision");
+	obs_property_list_add_string(combo_partial, "Personalizado  —  Configurar milisegundos exactos (Mín 500 ms)", "custom");
 
 	obs_properties_add_int_slider(group_partial, "custom_partial_interval_ms",
-	                              "Intervalo personalizado (ms):", 200, 5000, 50);
+	                              "Intervalo personalizado (ms):", 500, 5000, 50);
 
 	obs_properties_add_text(
 		group_partial, "partial_mode_help",
-		"Tiempo real (0.5s): Fluidez inmediata sin pausas.\n"
-		"Balanceado (1.0s): Buen equilibrio entre velocidad y estabilidad.\n"
-		"Alta Precisión (2.0s): Espera más audio para mayor contexto y precisión.\n"
-		"Personalizado: Permite ajustar libremente los milisegundos de muestreo.",
+		"Tiempo real (500ms): Fluidez inmediata sin pausas.\n"
+		"Balanceado (900ms): Buen equilibrio entre velocidad y estabilidad.\n"
+		"Alta Precisión (1800ms): Espera más audio para mayor contexto y precisión sintáctica.\n"
+		"Personalizado: Permite ajustar libremente los milisegundos de muestreo (Mínimo: 500 ms).",
 		OBS_TEXT_INFO);
 
 	obs_properties_add_group(props, "grp_partial", "4. Visualización y Muestreo de Subtítulos",
@@ -878,20 +879,52 @@ static void ai_filter_update(void *data, obs_data_t *settings)
 	fd->vad_min_speech_ms = (size_t)obs_data_get_int(settings, "vad_min_speech");
 	fd->vad_silence_hangover_ms = (size_t)obs_data_get_int(settings, "vad_hangover");
 
-	// Map partial_mode string -> interval in ms (0 = finals only)
+	// Map partial_mode string -> synchronized timing presets
 	{
 		const char *mode = obs_data_get_string(settings, "partial_mode");
 		int custom_ms = (int)obs_data_get_int(settings, "custom_partial_interval_ms");
-		if (custom_ms < 200) custom_ms = 1000;
+		if (custom_ms < 500) custom_ms = 500;
 
-		if (mode && strcmp(mode, "realtime") == 0)
+		if (mode && strcmp(mode, "realtime") == 0) {
 			fd->partial_send_interval_ms = 500;
-		else if (mode && strcmp(mode, "precision") == 0)
-			fd->partial_send_interval_ms = 2000;
-		else if (mode && strcmp(mode, "custom") == 0)
+			fd->vad_silence_hangover_ms = 350;
+			fd->vad_min_speech_ms = 150;
+			if (fd->animator) {
+				fd->animator->set_partial_throttle_ms(300);
+				fd->animator->set_final_display_lock_ms(150);
+			}
+		} else if (mode && strcmp(mode, "precision") == 0) {
+			fd->partial_send_interval_ms = 1800;
+			fd->vad_silence_hangover_ms = 750;
+			fd->vad_min_speech_ms = 300;
+			if (fd->animator) {
+				fd->animator->set_partial_throttle_ms(1000);
+				fd->animator->set_final_display_lock_ms(350);
+			}
+		} else if (mode && strcmp(mode, "custom") == 0) {
 			fd->partial_send_interval_ms = (size_t)custom_ms;
-		else // "balanced" or default
-			fd->partial_send_interval_ms = 1000;
+			fd->vad_min_speech_ms = (size_t)obs_data_get_int(settings, "vad_min_speech");
+			fd->vad_silence_hangover_ms = (size_t)obs_data_get_int(settings, "vad_hangover");
+			if (fd->animator) {
+				int throttle = (int)fd->partial_send_interval_ms * 2 / 3;
+				if (throttle < 300) throttle = 300;
+				fd->animator->set_partial_throttle_ms(throttle);
+				fd->animator->set_final_display_lock_ms(250);
+			}
+		} else { // "balanced" or default
+			fd->partial_send_interval_ms = 900;
+			fd->vad_silence_hangover_ms = 500;
+			fd->vad_min_speech_ms = 250;
+			if (fd->animator) {
+				fd->animator->set_partial_throttle_ms(600);
+				fd->animator->set_final_display_lock_ms(250);
+			}
+		}
+
+		// Ensure strictly at least 500 ms floor under any circumstance
+		if (fd->partial_send_interval_ms < 500) {
+			fd->partial_send_interval_ms = 500;
+		}
 
 		fd->partial_mode = mode ? mode : "balanced";
 	}
@@ -899,7 +932,6 @@ static void ai_filter_update(void *data, obs_data_t *settings)
 	if (fd->animator) {
 		fd->animator->set_auto_clear_seconds(fd->auto_clear_seconds);
 		fd->animator->set_max_lines(fd->max_lines);
-		fd->animator->set_partial_throttle_ms((int)fd->partial_send_interval_ms);
 	}
 
 	// Determine Whisper model path
@@ -913,13 +945,22 @@ static void ai_filter_update(void *data, obs_data_t *settings)
 	} else {
 		const char *model_size = obs_data_get_string(settings, "model_settings");
 		char rel[256];
-		snprintf(rel, sizeof(rel), "models/%s", model_size);
-		char *abs_path = obs_module_file(rel);
-		if (abs_path) {
-			new_path = abs_path;
-			bfree(abs_path);
+		snprintf(rel, sizeof(rel), "models/%s", (model_size && *model_size) ? model_size : "ggml-base.bin");
+
+		char *cfg_path = obs_module_config_path(rel);
+		if (cfg_path && os_file_exists(cfg_path)) {
+			new_path = cfg_path;
+			bfree(cfg_path);
 		} else {
-			blog(LOG_ERROR, "[AI Translator] Model file not found: %s", rel);
+			if (cfg_path) bfree(cfg_path);
+			char *abs_path = obs_module_file(rel);
+			if (abs_path && os_file_exists(abs_path)) {
+				new_path = abs_path;
+				bfree(abs_path);
+			} else {
+				if (abs_path) bfree(abs_path);
+				blog(LOG_ERROR, "[AI Translator] Model file not found: %s", rel);
+			}
 		}
 	}
 
@@ -1056,7 +1097,7 @@ static void update_obs_text_source(ai_filter_data *data, const std::string &disp
 	if (custom_source != nullptr) {
 		std::string lang = data->target_language;
 		if (lang.empty() || lang == "original") lang = data->current_language;
-		if (lang == "auto") lang = "";
+		if (lang == "auto" || lang.empty()) lang = "AUTO";
 		for (auto &c : lang) c = toupper(c);
 
 		obs_data_t *settings = obs_source_get_settings(custom_source);
@@ -1243,10 +1284,10 @@ static void ai_filter_get_defaults(obs_data_t *settings)
 	obs_data_set_default_int(settings, "auto_clear_seconds", 5);
 	obs_data_set_default_int(settings, "max_lines", 2);
 	obs_data_set_default_string(settings, "partial_mode", "balanced");
-	obs_data_set_default_int(settings, "custom_partial_interval_ms", 1500);
+	obs_data_set_default_int(settings, "custom_partial_interval_ms", 1000);
 	obs_data_set_default_double(settings, "vad_rms", 0.003);
-	obs_data_set_default_int(settings, "vad_min_speech", 200);
-	obs_data_set_default_int(settings, "vad_hangover", 800);
+	obs_data_set_default_int(settings, "vad_min_speech", 250);
+	obs_data_set_default_int(settings, "vad_hangover", 500);
 }
 
 // Fetch audio buffer from pool

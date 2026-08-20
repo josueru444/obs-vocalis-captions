@@ -65,6 +65,10 @@ struct MyCaptionsFont {
 	bool cached_bottom_align{false};
 	std::string cached_align{"left"};
 	int cached_max_lines{-1};
+	// Language Badge settings
+	bool cached_show_lang_badge{true};
+	int cached_lang_font_size{22};
+	long long cached_lang_color{0xFFBBBBBB};
 	// Partial/Final color state
 	bool cached_is_partial{false};
 	bool cached_word_wrap{true};
@@ -192,7 +196,8 @@ static void my_font_render(void *data, gs_effect_t *effect)
 
 	uint32_t cx = obs_source_get_width(ctx->text_font);
 	uint32_t cy = obs_source_get_height(ctx->text_font);
-	uint32_t lang_cy = ctx->cached_lang_code.empty() ? 0 : obs_source_get_height(ctx->lang_font);
+	bool show_badge = ctx->cached_show_lang_badge && !ctx->cached_lang_code.empty();
+	uint32_t lang_cy = show_badge ? obs_source_get_height(ctx->lang_font) : 0;
 	
 	float bg_width = ctx->cached_fixed_bg_width ? (float)ctx->cached_custom_width : (float)(cx + 20);
 	
@@ -255,7 +260,7 @@ static void my_font_render(void *data, gs_effect_t *effect)
 	}
 
 	float lang_offset_x = 10.0f;
-	if (!ctx->cached_lang_code.empty() && lang_cy > 0) {
+	if (show_badge && lang_cy > 0) {
 		uint32_t lang_cx = obs_source_get_width(ctx->lang_font);
 		if (ctx->cached_align == "center") {
 			if (animated_bg_width > (float)lang_cx + 20.0f) {
@@ -305,7 +310,7 @@ static void my_font_render(void *data, gs_effect_t *effect)
 	}
 
 	// 4. Render Language Badge
-	if (!ctx->cached_lang_code.empty() && lang_cy > 0) {
+	if (show_badge && lang_cy > 0) {
 		gs_matrix_push();
 		struct vec3 offset_lang;
 		vec3_set(&offset_lang, lang_offset_x, 10.0f, 0.0f);
@@ -348,7 +353,8 @@ static uint32_t my_font_get_height(void *data)
 	MyCaptionsFont *ctx = (MyCaptionsFont *)data;
 	if (ctx->anim_state == SubtitleAnimState::ANIM_IDLE || ctx->displayed_text.empty())
 		return 0;
-	uint32_t lang_cy = ctx->cached_lang_code.empty() ? 0 : obs_source_get_height(ctx->lang_font);
+	bool show_badge = ctx->cached_show_lang_badge && !ctx->cached_lang_code.empty();
+	uint32_t lang_cy = show_badge ? obs_source_get_height(ctx->lang_font) : 0;
 	if (ctx->cached_bottom_align) {
 		float estimated_line_height = (float)ctx->cached_font_size * 1.4f;
 		return (uint32_t)(ctx->cached_max_lines * estimated_line_height + 20.0f + (float)lang_cy);
@@ -532,17 +538,25 @@ static obs_properties_t *my_font_get_properties(void *data)
 	obs_properties_t *group_appearance = obs_properties_create();
 	obs_properties_add_font(group_appearance, "font", "Tipografía:");
 	obs_properties_add_color_alpha(group_appearance, "text_color", "Color del Texto:");
+	obs_properties_add_color_alpha(group_appearance, "bg_color", "Color de Fondo:");
 	obs_properties_add_bool(group_appearance, "outline", "Contorno de Texto");
 	obs_properties_add_int(group_appearance, "outline_size", "Grosor del Contorno:", 1, 20, 1);
 	obs_properties_add_int(group_appearance, "outline_opacity", "Opacidad del Contorno (%):", 0, 100, 1);
 	obs_properties_add_color_alpha(group_appearance, "outline_color", "Color del Contorno:");
-	obs_properties_add_bool(group_appearance, "drop_shadow", "Sombra Paralela");
-	obs_properties_add_color_alpha(group_appearance, "bg_color", "Color de Fondo:");
 
 	obs_properties_add_group(props, "grp_appearance", "2. Tipografía y Colores",
 				 OBS_GROUP_NORMAL, group_appearance);
 
-	// 3. Group: Layout & Format
+	// 3. Group: Language Badge
+	obs_properties_t *group_badge = obs_properties_create();
+	obs_properties_add_bool(group_badge, "show_lang_badge", "Mostrar Indicador de Idioma (Badge)");
+	obs_properties_add_int_slider(group_badge, "lang_badge_font_size", "Tamaño de Fuente del Indicador:", 10, 64, 1);
+	obs_properties_add_color_alpha(group_badge, "lang_badge_color", "Color del Texto del Indicador:");
+
+	obs_properties_add_group(props, "grp_badge", "3. Indicador de Idioma (Badge)",
+				 OBS_GROUP_NORMAL, group_badge);
+
+	// 4. Group: Layout & Format
 	obs_properties_t *group_layout = obs_properties_create();
 	obs_property_t *p_align = obs_properties_add_list(
 		group_layout, "align", "Alineación Horizontal:",
@@ -551,17 +565,11 @@ static obs_properties_t *my_font_get_properties(void *data)
 	obs_property_list_add_string(p_align, "Centro", "center");
 	obs_property_list_add_string(p_align, "Derecha", "right");
 
-	obs_properties_add_int(group_layout, "max_lines", "Máximo de Renglones:", 1, 10, 1);
-	obs_properties_add_bool(group_layout, "bottom_align", "Centrar Verticalmente (Caja de altura fija)");
+	obs_properties_add_int(group_layout, "custom_width", "Ancho del Contenedor (píxeles):", 100, 4096, 10);
+	obs_properties_add_bool(group_layout, "fixed_bg_width", "Fondo de Ancho Fijo (Usa el ancho completo)");
+	obs_properties_add_int(group_layout, "max_lines", "Máximo de Renglones visibles:", 1, 10, 1);
 
-	obs_property_t *p_wrap =
-		obs_properties_add_bool(group_layout, "word_wrap", "Activar Salto de Línea (Word Wrap)");
-	obs_properties_add_int(group_layout, "custom_width", "Ancho Máximo (píxeles):", 100, 4096, 10);
-	obs_properties_add_bool(group_layout, "fixed_bg_width", "Fondo de Ancho Fijo (Usa el ancho máximo)");
-
-	obs_property_set_modified_callback(p_wrap, on_word_wrap_changed);
-
-	obs_properties_add_group(props, "grp_layout", "3. Formato y Ajuste de Texto",
+	obs_properties_add_group(props, "grp_layout", "4. Dimensiones y Alineación en Pantalla",
 				 OBS_GROUP_NORMAL, group_layout);
 
 	return props;
@@ -582,6 +590,10 @@ static void my_font_get_defaults(obs_data_t *settings)
 	obs_data_set_default_bool(settings, "drop_shadow", false);
 	obs_data_set_default_int(settings, "bg_color", 0x00000000);
 	obs_data_set_default_bool(settings, "antialiasing", true);
+
+	obs_data_set_default_bool(settings, "show_lang_badge", true);
+	obs_data_set_default_int(settings, "lang_badge_font_size", 22);
+	obs_data_set_default_int(settings, "lang_badge_color", 0xFFBBBBBB);
 
 	obs_data_set_default_string(settings, "align", "left");
 
@@ -831,36 +843,55 @@ static void my_font_update(void *data, obs_data_t *settings)
 		obs_data_release(text_settings);
 	}
 	
+	bool show_lang_badge = obs_data_get_bool(settings, "show_lang_badge");
+	int lang_font_size = (int)obs_data_get_int(settings, "lang_badge_font_size");
+	if (lang_font_size <= 0) lang_font_size = 22;
+	long long lang_color = obs_data_get_int(settings, "lang_badge_color");
+	if (lang_color == 0 && !obs_data_has_user_value(settings, "lang_badge_color")) {
+		lang_color = 0xFFBBBBBB;
+	}
+
 	const char *lang_code_str = obs_data_get_string(settings, "lang_code");
-	std::string new_lang = lang_code_str ? lang_code_str : "";
-	
-	if (ctx->cached_lang_code != new_lang || appearance_changed) {
+	bool has_new_lang_code = false;
+	if (lang_code_str && *lang_code_str) {
+		if (ctx->cached_lang_code != lang_code_str) {
+			ctx->cached_lang_code = lang_code_str;
+			has_new_lang_code = true;
+		}
+	}
+
+	bool lang_appearance_changed = (ctx->cached_show_lang_badge != show_lang_badge ||
+	                                ctx->cached_lang_font_size != lang_font_size ||
+	                                ctx->cached_lang_color != lang_color ||
+	                                ctx->cached_font_face != font_face);
+
+	if (lang_appearance_changed || has_new_lang_code || (!ctx->cached_lang_code.empty() && text_changed)) {
+		ctx->cached_show_lang_badge = show_lang_badge;
+		ctx->cached_lang_font_size = lang_font_size;
+		ctx->cached_lang_color = lang_color;
+
 		obs_data_t *lang_settings = obs_data_create();
-		obs_data_set_string(lang_settings, "text", new_lang.c_str());
-		
-		int l_size = (int)((float)font_size * 0.40f);
-		if (l_size < 12) l_size = 12;
+		obs_data_set_string(lang_settings, "text", ctx->cached_lang_code.c_str());
 
 		obs_data_t *l_font = obs_data_create();
 		obs_data_set_string(l_font, "face", font_face.c_str());
 		obs_data_set_string(l_font, "style", "Bold");
-		obs_data_set_int(l_font, "size", l_size);
+		obs_data_set_int(l_font, "size", lang_font_size);
 		obs_data_set_obj(lang_settings, "font", l_font);
 		obs_data_release(l_font);
-		
+
 		int lang_op_to_set = (ctx->anim_state == SubtitleAnimState::ANIM_FADE_IN) ? 0 : 100;
 		int lang_outline_op_to_set = (ctx->anim_state == SubtitleAnimState::ANIM_FADE_IN) ? 0 : 100;
 
-		apply_text_color(lang_settings, 0xFFBBBBBB);
+		apply_text_color(lang_settings, lang_color);
 		obs_data_set_int(lang_settings, "opacity", lang_op_to_set);
 		obs_data_set_bool(lang_settings, "outline", true);
-		obs_data_set_int(lang_settings, "outline_size", 5);
+		obs_data_set_int(lang_settings, "outline_size", 4);
 		obs_data_set_int(lang_settings, "outline_opacity", lang_outline_op_to_set);
 		obs_data_set_int(lang_settings, "outline_color", 0xFF000000);
-		
+
 		obs_source_update(ctx->lang_font, lang_settings);
 		obs_data_release(lang_settings);
-		ctx->cached_lang_code = new_lang;
 	}
 
 	long long bg_color = obs_data_get_int(settings, "bg_color");
@@ -922,13 +953,17 @@ static void my_font_video_tick(void *data, float seconds)
 			ctx->current_bg_width = 0.0f;
 			ctx->current_bg_height = 0.0f;
 
-			// Clear text in internal sources cleanly
+			// Clear text in text_font cleanly and reset opacity for both
 			obs_data_t *clear_settings = obs_data_create();
 			obs_data_set_string(clear_settings, "text", "");
 			obs_data_set_int(clear_settings, "opacity", 0);
 			obs_source_update(ctx->text_font, clear_settings);
-			obs_source_update(ctx->lang_font, clear_settings);
 			obs_data_release(clear_settings);
+
+			obs_data_t *clear_lang_settings = obs_data_create();
+			obs_data_set_int(clear_lang_settings, "opacity", 0);
+			obs_source_update(ctx->lang_font, clear_lang_settings);
+			obs_data_release(clear_lang_settings);
 		}
 	} else if (ctx->anim_state == SubtitleAnimState::ANIM_VISIBLE) {
 		target_opacity = 100;

@@ -19,6 +19,8 @@ add_library(${CMAKE_PROJECT_NAME} MODULE
         src/ui/translator_dock.cpp
         src/ui/translator_dock.h
         src/ui/vector_icons.h
+        src/ui/whisper_model_manager.cpp
+        src/ui/whisper_model_manager.h
         src/ui/translator_settings_dialog.cpp
         src/ui/translator_settings_dialog.h
         src/ai_subtitle_source.cpp
@@ -38,9 +40,13 @@ if (ENABLE_FRONTEND_API)
     target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE OBS::obs-frontend-api)
 endif ()
 
+if (WIN32)
+    target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE winhttp)
+endif ()
+
 if (ENABLE_QT)
-    find_package(Qt6 COMPONENTS Widgets Core)
-    target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE Qt6::Core Qt6::Widgets)
+    find_package(Qt6 COMPONENTS Widgets Core Network)
+    target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE Qt6::Core Qt6::Widgets Qt6::Network)
     target_compile_options(
             ${CMAKE_PROJECT_NAME}
             PRIVATE $<$<C_COMPILER_ID:Clang,AppleClang>:-Wno-quoted-include-in-framework-header -Wno-comma>
@@ -126,7 +132,7 @@ if(WIN32)
     )
     FetchContent_MakeAvailable(opus)
     target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE opus)
-    target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${opus_SOURCE_DIR}/include)
+    target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${opus_SOURCE_DIR}/include ${opus_SOURCE_DIR})
 elseif(APPLE)
     find_package(Opus REQUIRED)
     target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE Opus::opus)
@@ -174,11 +180,13 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE src/plugin-main.c)
 
 set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_name})
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Core Network)
 target_link_libraries(${CMAKE_PROJECT_NAME}
         PRIVATE
         OBS::libobs
         Qt6::Widgets
+        Qt6::Core
+        Qt6::Network
 )
 #target_sources(${CMAKE_PROJECT_NAME} PRIVATE
 #        ui/setup.ui

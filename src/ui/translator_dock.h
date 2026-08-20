@@ -40,6 +40,12 @@ private slots:
     void onEngineModeChanged(int index);
     void onLanguageChanged();
     void onModelChanged(int index);
+    void onDownloadModelClicked();
+    void onDeleteModelClicked();
+    void onCancelDownloadClicked();
+    void onModelDownloadProgress(const QString &fileName, qint64 received, qint64 total, int percent);
+    void onModelDownloadFinished(const QString &fileName, bool success, const QString &errorMsg);
+    void updateModelComboList();
     void onUseCustomModelToggled(bool checked);
     void onCustomModelPathEditingFinished();
     void onGpuToggled(bool checked);
@@ -52,6 +58,7 @@ private:
     void setupUi();
     void loadSettingsFromFilter();
     void updateTargetSourceStyle();
+    void updateModelActionButtons();
     void saveSettingString(const char *key, const QString &val);
     void saveSettingBool(const char *key, bool val);
     void saveSettingInt(const char *key, int val);
@@ -103,6 +110,14 @@ private:
     // Local Whisper settings container
     QFrame *m_panelLocal{nullptr};
     QComboBox *m_cmbModel{nullptr};
+    QPushButton *m_btnDownloadModel{nullptr};
+    QPushButton *m_btnDeleteModel{nullptr};
+
+    QWidget *m_widgetDownloadProgress{nullptr};
+    QLabel *m_lblDownloadStatus{nullptr};
+    class QProgressBar *m_progressBar{nullptr};
+    QPushButton *m_btnCancelDownload{nullptr};
+
     QCheckBox *m_chkUseCustomModel{nullptr};
     QWidget *m_widgetCustomModel{nullptr};
     QLineEdit *m_txtCustomModelPath{nullptr};
