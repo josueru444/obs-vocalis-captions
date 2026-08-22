@@ -6,6 +6,64 @@
 #include <cmath>
 #include <util/platform.h>
 
+#if defined(_WIN32)
+#include <windows.h>
+#endif
+#include <QFontDatabase>
+#include <QGuiApplication>
+
+static bool is_font_available(const char *font_name)
+{
+	if (QGuiApplication::instance()) {
+		const QStringList families = QFontDatabase::families();
+		for (const QString &family : families) {
+			if (family.compare(QString::fromUtf8(font_name), Qt::CaseInsensitive) == 0) {
+				return true;
+			}
+		}
+	}
+#if defined(_WIN32)
+	HDC hdc = GetDC(NULL);
+	if (hdc) {
+		LOGFONTA lf = {0};
+		lf.lfCharSet = DEFAULT_CHARSET;
+		strncpy(lf.lfFaceName, font_name, sizeof(lf.lfFaceName) - 1);
+		bool found = false;
+		EnumFontFamiliesExA(hdc, &lf, [](const LOGFONTA *, const TEXTMETRICA *, DWORD, LPARAM lp) -> int {
+			bool *pFound = (bool *)lp;
+			*pFound = true;
+			return 0; // stop enumeration
+		}, (LPARAM)&found, 0);
+		ReleaseDC(NULL, hdc);
+		if (found) return true;
+	}
+#endif
+	return false;
+}
+
+static const char *get_default_font_face()
+{
+	static std::string s_default_face;
+	static bool s_checked = false;
+	if (!s_checked) {
+		s_checked = true;
+		if (is_font_available("Arial Black")) {
+			s_default_face = "Arial Black";
+		} else {
+			s_default_face = "Arial";
+		}
+	}
+	return s_default_face.c_str();
+}
+
+static const char *get_default_font_style()
+{
+	if (strcmp(get_default_font_face(), "Arial Black") == 0) {
+		return "Regular";
+	}
+	return "Bold";
+}
+
 // Configure cross-platform text source identifier
 #if defined(_WIN32)
 #define TEXT_SOURCE_ID "text_gdiplus_v2"
@@ -99,7 +157,7 @@ static void *my_font_create(obs_data_t *settings, obs_source_t *source)
 	data->cached_custom_width = 900;
 	data->cached_bottom_align = false;
 	data->cached_align = "left";
-	data->cached_max_lines = 3;
+	data->cached_max_lines = 2;
 
 	obs_data_t *text_defaults = obs_data_create();
 	obs_data_set_string(text_defaults, "text", "");
@@ -116,8 +174,8 @@ static void *my_font_create(obs_data_t *settings, obs_source_t *source)
 	obs_data_set_string(text_defaults, "align", "left");
 
 	obs_data_t *font_obj = obs_data_create();
-	obs_data_set_string(font_obj, "face", "Arial");
-	obs_data_set_string(font_obj, "style", "Regular");
+	obs_data_set_string(font_obj, "face", get_default_font_face());
+	obs_data_set_string(font_obj, "style", get_default_font_style());
 	obs_data_set_int(font_obj, "size", 45);
 	obs_data_set_obj(text_defaults, "font", font_obj);
 	obs_data_release(font_obj);
@@ -539,10 +597,10 @@ static obs_properties_t *my_font_get_properties(void *data)
 	obs_properties_add_font(group_appearance, "font", "Tipografía:");
 	obs_properties_add_color_alpha(group_appearance, "text_color", "Color del Texto:");
 	obs_properties_add_color_alpha(group_appearance, "bg_color", "Color de Fondo:");
-	obs_properties_add_bool(group_appearance, "outline", "Contorno de Texto");
-	obs_properties_add_int(group_appearance, "outline_size", "Grosor del Contorno:", 1, 20, 1);
-	obs_properties_add_int(group_appearance, "outline_opacity", "Opacidad del Contorno (%):", 0, 100, 1);
-	obs_properties_add_color_alpha(group_appearance, "outline_color", "Color del Contorno:");
+	obs_properties_add_bool(group_appearance, "outline", "Contorno / Sombra de Texto");
+	obs_properties_add_int(group_appearance, "outline_size", "Grosor de la Sombra / Contorno:", 1, 20, 1);
+	obs_properties_add_int(group_appearance, "outline_opacity", "Opacidad de la Sombra / Contorno (%):", 0, 100, 1);
+	obs_properties_add_color_alpha(group_appearance, "outline_color", "Color de la Sombra / Contorno:");
 
 	obs_properties_add_group(props, "grp_appearance", "2. Tipografía y Colores",
 				 OBS_GROUP_NORMAL, group_appearance);
@@ -567,7 +625,7 @@ static obs_properties_t *my_font_get_properties(void *data)
 
 	obs_properties_add_int(group_layout, "custom_width", "Ancho del Contenedor (píxeles):", 100, 4096, 10);
 	obs_properties_add_bool(group_layout, "fixed_bg_width", "Fondo de Ancho Fijo (Usa el ancho completo)");
-	obs_properties_add_int(group_layout, "max_lines", "Máximo de Renglones visibles:", 1, 10, 1);
+	obs_properties_add_int(group_layout, "max_lines", "Máximo de Párrafos visibles:", 1, 10, 1);
 
 	obs_properties_add_group(props, "grp_layout", "4. Dimensiones y Alineación en Pantalla",
 				 OBS_GROUP_NORMAL, group_layout);
@@ -584,10 +642,10 @@ static void my_font_get_defaults(obs_data_t *settings)
 
 	obs_data_set_default_int(settings, "text_color", 0xFFFFFFFF);
 	obs_data_set_default_bool(settings, "outline", true);
-	obs_data_set_default_int(settings, "outline_size", 3);
+	obs_data_set_default_int(settings, "outline_size", 8);
 	obs_data_set_default_int(settings, "outline_opacity", 100);
 	obs_data_set_default_int(settings, "outline_color", 0xFF000000);
-	obs_data_set_default_bool(settings, "drop_shadow", false);
+	obs_data_set_default_bool(settings, "drop_shadow", true);
 	obs_data_set_default_int(settings, "bg_color", 0x00000000);
 	obs_data_set_default_bool(settings, "antialiasing", true);
 
@@ -602,14 +660,14 @@ static void my_font_get_defaults(obs_data_t *settings)
 	obs_data_set_default_bool(settings, "fixed_bg_width", true);
 
 	obs_data_t *font_obj = obs_data_create();
-	obs_data_set_string(font_obj, "face", "Arial");
-	obs_data_set_string(font_obj, "style", "Bold");
-	obs_data_set_int(font_obj, "size", 56);
+	obs_data_set_string(font_obj, "face", get_default_font_face());
+	obs_data_set_string(font_obj, "style", get_default_font_style());
+	obs_data_set_int(font_obj, "size", 45);
 	obs_data_set_default_obj(settings, "font", font_obj);
 	obs_data_release(font_obj);
 
-	obs_data_set_default_int(settings, "max_lines", 3);
-	obs_data_set_default_bool(settings, "bottom_align", true);
+	obs_data_set_default_int(settings, "max_lines", 2);
+	obs_data_set_default_bool(settings, "bottom_align", false);
 }
 
 // Update source configuration settings
@@ -643,17 +701,17 @@ static void my_font_update(void *data, obs_data_t *settings)
 		font_obj = obs_data_get_default_obj(settings, "font");
 	}
 
-	int font_size = 56;
-	std::string font_face = "Arial";
-	std::string font_style = "Bold";
+	int font_size = 45;
+	std::string font_face = get_default_font_face();
+	std::string font_style = get_default_font_style();
 
 	if (font_obj) {
 		font_size = (int)obs_data_get_int(font_obj, "size");
 		if (font_size <= 0) font_size = 45;
 		const char *face = obs_data_get_string(font_obj, "face");
 		const char *style = obs_data_get_string(font_obj, "style");
-		if (face) font_face = face;
-		if (style) font_style = style;
+		if (face && *face) font_face = face;
+		if (style && *style) font_style = style;
 		obs_data_release(font_obj);
 	}
 
@@ -675,53 +733,26 @@ static void my_font_update(void *data, obs_data_t *settings)
 		int chars_per_line = (int)((float)custom_width / avg_char_width);
 		if (chars_per_line < 1) chars_per_line = 20;
 
-		std::vector<std::string> words;
-		{
-			std::string w;
-			for (char c : text_to_set) {
-				if (c == ' ' || c == '\n') {
-					if (!w.empty()) { words.push_back(w); w.clear(); }
-				} else {
-					w += c;
-				}
-			}
-			if (!w.empty()) words.push_back(w);
-		}
-
-		auto count_lines = [&](size_t start) -> int {
-			int lines = 1;
-			int line_chars = 0;
-			for (size_t i = start; i < words.size(); ++i) {
-				int wlen = (int)utf8_char_count(words[i]);
-				if (line_chars == 0) {
-					line_chars = wlen;
-				} else if (line_chars + 1 + wlen > chars_per_line) {
-					lines++;
-					line_chars = wlen;
-				} else {
-					line_chars += 1 + wlen;
-				}
-			}
-			return lines;
-		};
-
-		size_t first = 0;
-		if (max_lines > 0) {
-			while (first < words.size() && count_lines(first) > max_lines) {
-				first++;
+		// Calculate visual lines by counting lines per paragraph (separated by \n)
+		// without stripping explicit \n so each paragraph remains on its own line
+		int total_lines = 0;
+		std::string current_para;
+		for (char c : text_to_set) {
+			if (c == '\n') {
+				int p_chars = (int)utf8_char_count(current_para);
+				int p_lines = std::max(1, (p_chars + chars_per_line - 1) / chars_per_line);
+				total_lines += p_lines;
+				current_para.clear();
+			} else {
+				current_para += c;
 			}
 		}
-
-		final_lines = count_lines(first);
-
-		if (first > 0) {
-			std::string trimmed;
-			for (size_t i = first; i < words.size(); ++i) {
-				if (i > first) trimmed += ' ';
-				trimmed += words[i];
-			}
-			text_to_set = trimmed;
+		if (!current_para.empty() || text_to_set.empty()) {
+			int p_chars = (int)utf8_char_count(current_para);
+			int p_lines = std::max(1, (p_chars + chars_per_line - 1) / chars_per_line);
+			total_lines += p_lines;
 		}
+		final_lines = std::max(1, total_lines);
 	}
 
 	bool text_changed = (ctx->cached_text != text_to_set);

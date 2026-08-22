@@ -48,6 +48,11 @@ endfunction()
 
 # _setup_obs_studio: Create obs-studio build project, then build libobs and obs-frontend-api
 function(_setup_obs_studio)
+  if(EXISTS "${dependencies_dir}/cmake/libobsConfig.cmake" AND EXISTS "${dependencies_dir}/cmake/obs-frontend-apiConfig.cmake")
+    message(STATUS "OBS sources (${arch}) - up to date")
+    return()
+  endif()
+
   if(NOT libobs_DIR)
     set(_is_fresh --fresh)
   endif()
@@ -64,11 +69,13 @@ function(_setup_obs_studio)
     else()
       set(_cmake_generator "${CMAKE_GENERATOR}")
     endif()
-    if(NOT CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION OR CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION STREQUAL "")
-      set(CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION "10.0.22621.0")
+    if(CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION AND NOT CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION STREQUAL "")
+      set(_cmake_arch -A "${arch},version=${CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION}")
+      set(_cmake_extra "-DCMAKE_ENABLE_SCRIPTING=OFF" "-DCMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION=${CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION}")
+    else()
+      set(_cmake_arch -A "${arch}")
+      set(_cmake_extra "-DCMAKE_ENABLE_SCRIPTING=OFF")
     endif()
-    set(_cmake_arch -A "${arch},version=${CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION}")
-    set(_cmake_extra "-DCMAKE_SYSTEM_VERSION=${CMAKE_SYSTEM_VERSION}" "-DCMAKE_ENABLE_SCRIPTING=OFF" "-DCMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION=${CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION}")
   elseif(OS_MACOS)
     set(_cmake_generator "Xcode")
     set(_cmake_arch "-DCMAKE_OSX_ARCHITECTURES:STRING=arm64;x86_64")
@@ -94,7 +101,7 @@ function(_setup_obs_studio)
 
   message(STATUS "Build ${label} (Debug - ${arch})")
   execute_process(
-    COMMAND "${CMAKE_COMMAND}" --build build_${arch} --target ${_obs_target} --config Debug --parallel
+    COMMAND "${CMAKE_COMMAND}" --build build_${arch} --target ${_obs_target} --config Debug
     WORKING_DIRECTORY "${dependencies_dir}/${_obs_destination}"
     RESULT_VARIABLE _process_result
     COMMAND_ERROR_IS_FATAL ANY
@@ -104,7 +111,7 @@ function(_setup_obs_studio)
 
   message(STATUS "Build ${label} (Release - ${arch})")
   execute_process(
-    COMMAND "${CMAKE_COMMAND}" --build build_${arch} --target ${_obs_target} --config Release --parallel
+    COMMAND "${CMAKE_COMMAND}" --build build_${arch} --target ${_obs_target} --config Release
     WORKING_DIRECTORY "${dependencies_dir}/${_obs_destination}"
     RESULT_VARIABLE _process_result
     COMMAND_ERROR_IS_FATAL ANY

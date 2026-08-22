@@ -54,11 +54,16 @@ void TranslatorSettingsDialog::setupUi()
 
     m_cmbPartialMode = new QComboBox(this);
     m_cmbPartialMode->addItem("Tiempo Real (500 ms - Fluidez continua)", "realtime");
-    m_cmbPartialMode->addItem("Balanceado (900 ms - Recomendado)", "balanced");
+    m_cmbPartialMode->addItem("Balanceado (1300 ms - Recomendado)", "balanced");
     m_cmbPartialMode->addItem("Alta Precisión (1800 ms - Frases completas)", "precision");
     m_cmbPartialMode->addItem("Personalizado (Elegir milisegundos - Mín 500 ms)", "custom");
     connect(m_cmbPartialMode, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &TranslatorSettingsDialog::onPartialModeChanged);
     formRemote->addRow("Muestreo de Texto:", m_cmbPartialMode);
+
+    QLabel *lblSamplingWarning = new QLabel("⚠️ Advertencia: No se recomienda modificar el intervalo de muestreo del texto (por defecto es 1300 ms).", this);
+    lblSamplingWarning->setWordWrap(true);
+    lblSamplingWarning->setStyleSheet("color: #e67e22; font-size: 8pt; font-style: italic; margin-top: 2px;");
+    formRemote->addRow("", lblSamplingWarning);
 
     m_widgetCustomInterval = new QWidget(this);
     QHBoxLayout *customIntervalLayout = new QHBoxLayout(m_widgetCustomInterval);

@@ -211,19 +211,19 @@ endif()
 if(WIN32)
     add_custom_command(TARGET ${CMAKE_PROJECT_NAME} POST_BUILD
             # Create directories
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${OBS_PLUGIN_INSTALL_DIR}/obs-plugins/64bit/"
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${OBS_PLUGIN_INSTALL_DIR}/data/obs-plugins/${CMAKE_PROJECT_NAME}/models/"
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${OBS_PLUGIN_INSTALL_DIR}/data/obs-plugins/${CMAKE_PROJECT_NAME}/locale/"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${OBS_PLUGIN_INSTALL_DIR}/obs-plugins/64bit/" || ${CMAKE_COMMAND} -E true
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${OBS_PLUGIN_INSTALL_DIR}/data/obs-plugins/${CMAKE_PROJECT_NAME}/models/" || ${CMAKE_COMMAND} -E true
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${OBS_PLUGIN_INSTALL_DIR}/data/obs-plugins/${CMAKE_PROJECT_NAME}/locale/" || ${CMAKE_COMMAND} -E true
 
             # Copy compiled binary and debug symbols
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:${CMAKE_PROJECT_NAME}>" "${OBS_PLUGIN_INSTALL_DIR}/obs-plugins/64bit/"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:${CMAKE_PROJECT_NAME}>" "${OBS_PLUGIN_INSTALL_DIR}/obs-plugins/64bit/" || ${CMAKE_COMMAND} -E true
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE_DIR:${CMAKE_PROJECT_NAME}>/$<TARGET_FILE_BASE_NAME:${CMAKE_PROJECT_NAME}>.pdb" "${OBS_PLUGIN_INSTALL_DIR}/obs-plugins/64bit/" || ${CMAKE_COMMAND} -E true
 
             # Copy models directory recursively only if it exists (models are optional in CI)
             COMMAND ${CMAKE_COMMAND}
                     -DSRC="${CMAKE_CURRENT_SOURCE_DIR}/models"
                     -DDST="${OBS_PLUGIN_INSTALL_DIR}/data/obs-plugins/${CMAKE_PROJECT_NAME}/models"
-                    -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/copy_if_exists.cmake"
+                    -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/copy_if_exists.cmake" || ${CMAKE_COMMAND} -E true
                     
             # Copy locale directory
             COMMAND ${CMAKE_COMMAND}
@@ -235,7 +235,7 @@ if(WIN32)
     )
     if(OPENSSL_DLLS)
         add_custom_command(TARGET ${CMAKE_PROJECT_NAME} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENSSL_DLLS} "${OBS_PLUGIN_INSTALL_DIR}/obs-plugins/64bit/"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENSSL_DLLS} "${OBS_PLUGIN_INSTALL_DIR}/obs-plugins/64bit/" || ${CMAKE_COMMAND} -E true
             COMMAND_EXPAND_LISTS
         )
     endif()

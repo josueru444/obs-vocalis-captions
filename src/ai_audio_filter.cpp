@@ -821,7 +821,7 @@ obs_properties_t *ai_filter_get_properties(void *data)
 		                        "Modo de actualización del texto:",
 		                        OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
 	obs_property_list_add_string(combo_partial, "Tiempo real  —  500 ms (Fluidez continua)", "realtime");
-	obs_property_list_add_string(combo_partial, "Balanceado   —  900 ms (Recomendado)", "balanced");
+	obs_property_list_add_string(combo_partial, "Balanceado   —  1300 ms (Recomendado)", "balanced");
 	obs_property_list_add_string(combo_partial, "Alta Precisión —  1800 ms (Frases completas)", "precision");
 	obs_property_list_add_string(combo_partial, "Personalizado  —  Configurar milisegundos exactos (Mín 500 ms)", "custom");
 
@@ -830,10 +830,11 @@ obs_properties_t *ai_filter_get_properties(void *data)
 
 	obs_properties_add_text(
 		group_partial, "partial_mode_help",
-		"Tiempo real (500ms): Fluidez inmediata sin pausas.\n"
-		"Balanceado (900ms): Buen equilibrio entre velocidad y estabilidad.\n"
-		"Alta Precisión (1800ms): Espera más audio para mayor contexto y precisión sintáctica.\n"
-		"Personalizado: Permite ajustar libremente los milisegundos de muestreo (Mínimo: 500 ms).",
+		"⚠️ Advertencia: No se recomienda modificar el intervalo del muestreo del texto (por defecto es 1300 ms).\n\n"
+		"• Balanceado (1300 ms - Recomendado): Equilibrio óptimo entre velocidad y estabilidad.\n"
+		"• Tiempo real (500 ms): Fluidez inmediata sin pausas.\n"
+		"• Alta Precisión (1800 ms): Espera más audio para mayor contexto y precisión sintáctica.\n"
+		"• Personalizado: Permite ajustar libremente los milisegundos de muestreo (Mínimo: 500 ms).",
 		OBS_TEXT_INFO);
 
 	obs_properties_add_group(props, "grp_partial", "4. Visualización y Muestreo de Subtítulos",
@@ -912,11 +913,11 @@ static void ai_filter_update(void *data, obs_data_t *settings)
 				fd->animator->set_final_display_lock_ms(250);
 			}
 		} else { // "balanced" or default
-			fd->partial_send_interval_ms = 900;
+			fd->partial_send_interval_ms = 1300;
 			fd->vad_silence_hangover_ms = 500;
 			fd->vad_min_speech_ms = 250;
 			if (fd->animator) {
-				fd->animator->set_partial_throttle_ms(600);
+				fd->animator->set_partial_throttle_ms(800);
 				fd->animator->set_final_display_lock_ms(250);
 			}
 		}
@@ -1101,6 +1102,17 @@ static void update_obs_text_source(ai_filter_data *data, const std::string &disp
 		for (auto &c : lang) c = toupper(c);
 
 		obs_data_t *settings = obs_source_get_settings(custom_source);
+
+		// Synchronize max_lines and auto_clear dynamically from the subtitle source properties
+		int src_max_lines = (int)obs_data_get_int(settings, "max_lines");
+		if (src_max_lines > 0 && data->animator) {
+			data->animator->set_max_lines((size_t)src_max_lines);
+		}
+		int src_auto_clear = (int)obs_data_get_int(settings, "auto_clear_seconds");
+		if (src_auto_clear > 0 && data->animator) {
+			data->animator->set_auto_clear_seconds(src_auto_clear);
+		}
+
 		obs_data_set_string(settings, "text", display_text.c_str());
 		obs_data_set_string(settings, "lang_code", lang.c_str());
 		

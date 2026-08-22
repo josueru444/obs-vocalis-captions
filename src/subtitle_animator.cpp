@@ -84,17 +84,29 @@ void SubtitleAnimator::trigger_auto_clear()
 
 void SubtitleAnimator::rebuild_target_strings()
 {
-	// Join confirmed sentences into a single display string
-	m_target_confirmed_string = "";
-	for (const auto &line : m_target_confirmed)
-		m_target_confirmed_string += line + " ";
-	if (!m_target_confirmed_string.empty() && m_target_confirmed_string.back() == ' ')
-		m_target_confirmed_string.pop_back();
-
 	// Extract latest partial sentence
 	m_target_partial_string = "";
 	if (!m_active_partial.empty())
 		m_target_partial_string = m_active_partial.rbegin()->second;
+
+	// Calculate how many confirmed sentences can be shown simultaneously.
+	// If a partial sentence is active, it takes 1 line/paragraph at the bottom, so
+	// we display up to (m_max_lines - 1) confirmed sentences above it.
+	// If no partial is active, we display up to m_max_lines confirmed sentences.
+	size_t has_partial = m_target_partial_string.empty() ? 0 : 1;
+	size_t max_conf = (m_max_lines > has_partial) ? (m_max_lines - has_partial) : (has_partial ? 0 : 1);
+
+	// Join the most recent confirmed sentences with explicit newline "\n" (Roll-up paragraphs)
+	m_target_confirmed_string = "";
+	if (max_conf > 0 && !m_target_confirmed.empty()) {
+		size_t count = m_target_confirmed.size();
+		size_t start_idx = (count > max_conf) ? (count - max_conf) : 0;
+		for (size_t i = start_idx; i < count; ++i) {
+			if (!m_target_confirmed_string.empty())
+				m_target_confirmed_string += "\n";
+			m_target_confirmed_string += m_target_confirmed[i];
+		}
+	}
 }
 
 // Update target subtitle text for confirmed or partial results
@@ -233,9 +245,14 @@ void SubtitleAnimator::worker_loop()
 			current_confirmed = target_confirmed;
 			current_partial   = target_partial;
 
-			std::string display = current_confirmed;
-			if (!current_partial.empty())
-				display += (display.empty() ? "" : " ") + current_partial;
+			std::string display = "";
+			if (!current_confirmed.empty() && !current_partial.empty()) {
+				display = current_confirmed + "\n" + current_partial;
+			} else if (!current_confirmed.empty()) {
+				display = current_confirmed;
+			} else if (!current_partial.empty()) {
+				display = current_partial;
+			}
 
 			if (m_callback) m_callback(display, !current_partial.empty());
 			last_partial_tick = std::chrono::steady_clock::now();
@@ -262,11 +279,17 @@ void SubtitleAnimator::worker_loop()
 
 		current_partial = target_partial;
 
-		std::string display = current_confirmed;
-		if (!current_partial.empty())
-			display += (display.empty() ? "" : " ") + current_partial;
+		std::string display = "";
+		if (!current_confirmed.empty() && !current_partial.empty()) {
+			display = current_confirmed + "\n" + current_partial;
+		} else if (!current_confirmed.empty()) {
+			display = current_confirmed;
+		} else if (!current_partial.empty()) {
+			display = current_partial;
+		}
 
 		if (m_callback) m_callback(display, !current_partial.empty());
 		last_partial_tick = now;
 	}
 }
+
