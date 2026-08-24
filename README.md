@@ -6,7 +6,7 @@ El plugin admite dos modos operativos principales: inferencia local y privada me
 
 [![OBS Studio](https://img.shields.io/badge/OBS%20Studio-30.0%2B%20%7C%2031.0%2B-blue)](https://obsproject.com/)
 [![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](#compilación)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-lightgrey)](#compilación)
 [![Language](https://img.shields.io/badge/Language-C%2B%2B17%20%2F%20Qt6-informational)](#requisitos-de-compilación)
 
 ---
@@ -24,6 +24,7 @@ El plugin admite dos modos operativos principales: inferencia local y privada me
 - [Compilación](#compilación)
   - [Requisitos de Compilación](#requisitos-de-compilación)
   - [Instrucciones de Construcción](#instrucciones-de-construcción)
+  - [Instalación Automática al Compilar](#-instalación-automática-al-compilar)
 - [Diagnóstico y Resolución de Problemas](#diagnóstico-y-resolución-de-problemas)
 - [Licencia y Reconocimientos](#licencia-y-reconocimientos)
 
@@ -205,8 +206,7 @@ El gestor de modelos integrado en el panel Dock permite descargar y alternar ent
 - **Qt6:** Componentes `Core`, `Widgets` y `Network`.
 - **Compilador C++17:**
   - Windows: Visual Studio 2022 (MSVC toolset v143).
-  - macOS: Xcode 15+ / Apple Clang.
-  - Linux: GCC 11+ o Clang 14+ con paquetes de desarrollo (`libobs-dev`, `qt6-base-dev`, `libopus-dev`, `libssl-dev`).
+  - Linux: GCC 11+ o Clang 14+ con paquetes de desarrollo (`libobs-dev`, `qt6-base-dev`, `libopus-dev`, `libssl-dev`, `pkg-config`).
 - **Dependencias Opcionales:**
   - Vulkan SDK para aceleración por GPU en whisper.cpp.
   - OpenSSL para compatibilidad con WebSockets cifrados (`wss://`).
@@ -226,6 +226,23 @@ git submodule update --init --recursive
 
 #### 2. Configurar y compilar
 
+**En Linux (Ubuntu / Debian / Fedora / Arch):**
+
+Instalar dependencias necesarias (ejemplo en Ubuntu/Debian):
+```bash
+sudo apt update
+sudo apt install -y build-essential cmake qt6-base-dev libobs-dev libopus-dev libssl-dev pkg-config
+```
+
+Configurar y compilar:
+```bash
+cmake -B build -S . \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DENABLE_QT=ON
+
+cmake --build build --config Release -j$(nproc)
+```
+
 **En Windows (Visual Studio / Ninja):**
 ```powershell
 cmake -B build_x64 -S . `
@@ -235,16 +252,28 @@ cmake -B build_x64 -S . `
 cmake --build build_x64 --config Release
 ```
 
-**En Linux / macOS:**
-```bash
-cmake -B build -S . \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DENABLE_QT=ON
+---
 
-cmake --build build --config Release -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
-```
+### 🚀 Instalación Automática al Compilar
 
-*Nota para desarrollo en Windows:* Tras la compilación en modo Release o Debug, el sistema CMake ejecutará un paso post-compilación para copiar automáticamente el módulo binario compilado a la ruta estándar de plugins de OBS Studio (`C:/Program Files/obs-studio/obs-plugins/64bit/`).
+El sistema CMake está preparado para que **no tengas que copiar archivos manualmente**:
+
+1. **Descarga automática de modelos IA:** Durante la configuración inicial de CMake (`cmake -B ...`), se descargarán automáticamente los modelos esenciales (`ggml-tiny.bin`, `ggml-base.bin`, `ggml-small.bin` y Silero VAD) directamente a la carpeta `models/`.
+2. **Copia automática del plugin y recursos (Post-Build):**
+   - **En Linux:** Al finalizar la compilación, CMake creará los directorios e instalará automáticamente el archivo `.so`, los modelos IA y las traducciones en:
+     ```
+     ~/.config/obs-studio/plugins/obs-plugin-traduccion/
+     ├── bin/64bit/obs-plugin-traduccion.so
+     └── data/
+         ├── models/
+         └── locale/
+     ```
+   - **En Windows:** Al compilar, CMake copiará automáticamente el archivo `.dll`, `.pdb`, modelos y traducciones a:
+     ```
+     C:/Program Files/obs-studio/
+     ```
+
+> Una vez finalice `cmake --build`, simplemente abre **OBS Studio** y el plugin estará instalado y listo para usarse.
 
 ---
 
