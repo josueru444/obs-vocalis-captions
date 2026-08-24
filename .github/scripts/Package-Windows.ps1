@@ -78,6 +78,13 @@ function Package {
         }
     }
     Log-Group
+
+    $ZipSource = "${ProjectRoot}/release/${Configuration}/${ProductName}"
+    if (Test-Path $ZipSource) {
+        Log-Group "Creating ZIP archive for ${ProductName}..."
+        Compress-Archive -Path "${ZipSource}/*" -DestinationPath "${ProjectRoot}/release/${OutputName}.zip" -Force
+        Log-Group
+    }
 }
 
 Package

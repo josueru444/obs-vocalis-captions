@@ -27,7 +27,7 @@ jobs:
 
   release:
     needs: build
-    if: ${{ inputs.create_release }}
+    if: inputs.create_release == true || github.event.inputs.create_release == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
