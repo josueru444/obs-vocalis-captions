@@ -7,6 +7,14 @@ on:
         description: 'Versión del Release (ej: v1.0.0)'
         required: true
         default: 'v1.0.0'
+      release_notes:
+        description: 'Notas de la versión / Descripción'
+        required: false
+        default: 'Novedades y correcciones en esta versión.'
+      is_draft:
+        description: '¿Crear como Borrador (Oculto hasta que lo publiques)?'
+        type: boolean
+        default: true
       create_release:
         description: '¿Crear GitHub Release con los archivos generados?'
         type: boolean
@@ -36,7 +44,9 @@ jobs:
           files: release-artifacts/**/*
           tag_name: ${{ inputs.version_tag }}
           name: Release ${{ inputs.version_tag }}
-          draft: false
+          body: ${{ inputs.release_notes }}
+          draft: ${{ inputs.is_draft }}
           prerelease: false
           generate_release_notes: true
+
 
