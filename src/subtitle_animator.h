@@ -62,7 +62,7 @@ private:
 	std::string m_target_confirmed_string;
 	std::string m_target_partial_string;
 
-	size_t m_max_lines{2};
+	size_t m_max_lines{3};
 	int m_auto_clear_seconds{5};
 	int m_custom_width{900};
 	int m_font_size{45};

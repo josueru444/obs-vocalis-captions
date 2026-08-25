@@ -168,7 +168,7 @@ static void *my_font_create(obs_data_t *settings, obs_source_t *source)
 	data->cached_custom_width = 900;
 	data->cached_bottom_align = false;
 	data->cached_align = "left";
-	data->cached_max_lines = 2;
+	data->cached_max_lines = 3;
 
 	obs_data_t *text_defaults = obs_data_create();
 	obs_data_set_string(text_defaults, "text", "");
@@ -655,7 +655,7 @@ static obs_properties_t *my_font_get_properties(void *data)
 
 	obs_properties_add_int(group_layout, "custom_width", "Ancho del Contenedor (píxeles):", 100, 4096, 10);
 	obs_properties_add_bool(group_layout, "fixed_bg_width", "Fondo de Ancho Fijo (Usa el ancho completo)");
-	obs_properties_add_int(group_layout, "max_lines", "Máximo de Párrafos visibles:", 1, 10, 1);
+	obs_properties_add_int(group_layout, "max_lines", "Máximo de Líneas visibles:", 1, 10, 1);
 
 	obs_properties_add_group(props, "grp_layout", "4. Dimensiones y Alineación en Pantalla",
 				 OBS_GROUP_NORMAL, group_layout);
@@ -697,7 +697,7 @@ static void my_font_get_defaults(obs_data_t *settings)
 	obs_data_set_default_obj(settings, "font", font_obj);
 	obs_data_release(font_obj);
 
-	obs_data_set_default_int(settings, "max_lines", 2);
+	obs_data_set_default_int(settings, "max_lines", 3);
 	obs_data_set_default_bool(settings, "bottom_align", false);
 }
 

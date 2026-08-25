@@ -79,7 +79,7 @@ static std::vector<std::string> split_text_into_lines(const std::string &text, i
 void SubtitleAnimator::set_max_lines(size_t lines)
 {
 	std::lock_guard<std::mutex> lock(m_mutex);
-	m_max_lines = (lines > 0) ? lines : 2;
+	m_max_lines = (lines > 0) ? lines : 3;
 	rebuild_target_strings();
 	m_cv.notify_one();
 }
@@ -175,7 +175,7 @@ void SubtitleAnimator::rebuild_target_strings()
 	int chars_per_line = (int)((float)m_custom_width / avg_char_width);
 	if (chars_per_line < 10) chars_per_line = 38;
 
-	size_t max_lines = (m_max_lines > 0) ? m_max_lines : 2;
+	size_t max_lines = (m_max_lines > 0) ? m_max_lines : 3;
 
 	// 1. Extract and split active partial sentence into lines
 	std::vector<std::string> partial_lines;

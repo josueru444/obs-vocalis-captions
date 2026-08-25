@@ -102,7 +102,7 @@ struct ai_filter_data {
 	// ── Auto-clear & Performance ──────────────────────────────────────────
 	obs_weak_source_t *subtitle_weak_ref{nullptr};
 	int auto_clear_seconds{5};
-	size_t max_lines{2};
+	size_t max_lines{3};
 
 	SubtitleAnimator *animator{nullptr};
 	obs_source_t *context{nullptr};
@@ -1301,7 +1301,7 @@ static void ai_filter_get_defaults(obs_data_t *settings)
 	obs_data_set_default_string(settings, "ws_url", "");
 	obs_data_set_default_string(settings, "ws_token", "");
 	obs_data_set_default_int(settings, "auto_clear_seconds", 5);
-	obs_data_set_default_int(settings, "max_lines", 2);
+	obs_data_set_default_int(settings, "max_lines", 3);
 	obs_data_set_default_string(settings, "partial_mode", "balanced");
 	obs_data_set_default_int(settings, "custom_partial_interval_ms", 1000);
 	obs_data_set_default_double(settings, "vad_rms", 0.003);
