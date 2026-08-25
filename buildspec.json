@@ -33,11 +33,11 @@
     },
     "platformConfig": {
         "macos": {
-            "bundleId": "com.example.obs-plugin-traduccion"
+            "bundleId": "com.example.obs-vocalis-captions"
         }
     },
-    "name": "obs-plugin-traduccion",
-    "displayName": "OBS Plugin Traduccion",
+    "name": "obs-vocalis-captions",
+    "displayName": "Vocalis Captions",
     "version": "1.0.0",
     "author": "Your Name Here",
     "website": "https://example.com",

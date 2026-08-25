@@ -72,7 +72,7 @@ QString WhisperModelManager::getModelsDirectory() const
 
     // 2. Standard user directory in AppData (always writable)
     QString appDataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    QString fallbackDir = appDataDir + "/obs-plugins/obs-plugin-traduccion/models";
+    QString fallbackDir = appDataDir + "/obs-plugins/obs-vocalis-captions/models";
     QDir().mkpath(fallbackDir);
     return fallbackDir;
 }

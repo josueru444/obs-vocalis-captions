@@ -120,7 +120,7 @@ jobs:
       - name: Diagnose DLL Dependencies 🔍
         shell: pwsh
         run: |
-          $dll = (Get-ChildItem -Path "$env:GITHUB_WORKSPACE/release" -Recurse -Filter "obs-plugin-traduccion.dll" | Select-Object -First 1).FullName
+          $dll = (Get-ChildItem -Path "$env:GITHUB_WORKSPACE/release" -Recurse -Filter "*.dll" | Select-Object -First 1).FullName
           if ($dll) {
             Write-Host "=== Found DLL: $dll ==="
             pip install pefile -q

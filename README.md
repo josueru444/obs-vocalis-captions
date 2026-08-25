@@ -1,4 +1,4 @@
-# OBS Plugin Traductor & Subtítulos IA
+# Vocalis Captions para OBS
 
 Plugin de transcripción de voz a texto (STT), traducción en tiempo real y renderizado de subtítulos estilizados en vivo para OBS Studio.
 
@@ -33,7 +33,7 @@ El plugin admite dos modos operativos principales: inferencia local y privada me
 ## Características Principales
 
 - **Doble Motor de Inferencia:**
-  - **Inferencia Local:** Procesamiento totalmente fuera de línea utilizando whisper.cpp. Soporta aceleración gráfica vía Vulkan e instrucciones vectoriales de procesador (AVX, AVX2, FMA, F16C).
+  - **Inferencia Local:** Procesamiento totalmente offline utilizando whisper.cpp. Soporta aceleración gráfica vía Vulkan e instrucciones vectoriales de procesador (AVX, AVX2, FMA, F16C).
   - **Inferencia Remota:** Streaming de baja latencia con códec Opus (16 kHz, mono, 24 kbps VoIP) a servidores WebSocket (`ws://` y `wss://` con TLS / SNI).
 - **Detección de Actividad de Voz (VAD):**
   - Integración nativa del modelo neuronal Silero VAD v5 para segmentación precisa de locución y descarte de silencios y ruido de fondo.
@@ -49,9 +49,6 @@ El plugin admite dos modos operativos principales: inferencia local y privada me
   - Selector dinámico de entrada de audio y enlace a la fuente de subtítulos.
   - Gestor de modelos Whisper con descarga directa desde repositorios HuggingFace, visualización de progreso y eliminación de archivos.
   - Controles de intervención inmediata: botón de purga de subtítulos y conmutador de pausa/reanudación.
-- **Filtros de Sanitización de Texto:**
-  - Supresión automática de alucinaciones frecuentes generadas por Whisper (frases vacías, etiquetas de audio y bucles repetitivos).
-
 ---
 
 ## Arquitectura del Código
@@ -59,7 +56,7 @@ El plugin admite dos modos operativos principales: inferencia local y privada me
 El proyecto está modularizado en componentes de procesamiento de audio, clientes de red, renderizado gráfico e interfaces de usuario:
 
 ```
-obs-plugin-traduccion/
+obs-vocalis-captions/
 ├── CMakeLists.txt              # Configuración de compilación, dependencias y descarga de modelos
 ├── buildspec.json              # Metadatos del módulo para OBS Studio
 ├── cmake/                      # Scripts auxiliares para empaquetado y dependencias
@@ -215,8 +212,8 @@ El gestor de modelos integrado en el panel Dock permite descargar y alternar ent
 
 #### 1. Clonar el repositorio y submódulos
 ```bash
-git clone --recursive https://github.com/josueru444/obs-plugin-traduccion.git
-cd obs-plugin-traduccion
+git clone --recursive https://github.com/josueru444/obs-vocalis-captions.git
+cd obs-vocalis-captions
 ```
 
 En caso de haber clonado sin `--recursive`:
@@ -254,7 +251,7 @@ cmake --build build_x64 --config Release
 
 ---
 
-### 🚀 Instalación Automática al Compilar
+### Instalación Automática al Compilar
 
 El sistema CMake está preparado para que **no tengas que copiar archivos manualmente**:
 
@@ -262,8 +259,8 @@ El sistema CMake está preparado para que **no tengas que copiar archivos manual
 2. **Copia automática del plugin y recursos (Post-Build):**
    - **En Linux:** Al finalizar la compilación, CMake creará los directorios e instalará automáticamente el archivo `.so`, los modelos IA y las traducciones en:
      ```
-     ~/.config/obs-studio/plugins/obs-plugin-traduccion/
-     ├── bin/64bit/obs-plugin-traduccion.so
+     ~/.config/obs-studio/plugins/obs-vocalis-captions/
+     ├── bin/64bit/obs-vocalis-captions.so
      └── data/
          ├── models/
          └── locale/
