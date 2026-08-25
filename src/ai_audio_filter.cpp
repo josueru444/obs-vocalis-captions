@@ -555,7 +555,7 @@ std::vector<ActiveFilterItem> get_active_filter_list() {
 			const char *fname = obs_source_get_name(fd->context);
 			if (pname && pname[0] != '\0') {
 				name = std::string(pname);
-				if (fname && strcmp(fname, "Traductor IA") != 0 && fname[0] != '\0') {
+				if (fname && strcmp(fname, "Traductor") != 0 && strcmp(fname, "Traductor IA") != 0 && fname[0] != '\0') {
 					name += " (" + std::string(fname) + ")";
 				}
 			} else if (fname && fname[0] != '\0') {
@@ -856,7 +856,7 @@ obs_properties_t *ai_filter_get_properties(void *data)
 static const char *ai_filter_get_name(void *data)
 {
 	(void)data;
-	return "Traductor IA";
+	return "Traductor";
 }
 
 // Apply updated plugin settings
@@ -1103,14 +1103,21 @@ static void update_obs_text_source(ai_filter_data *data, const std::string &disp
 
 		obs_data_t *settings = obs_source_get_settings(custom_source);
 
-		// Synchronize max_lines and auto_clear dynamically from the subtitle source properties
+		// Synchronize max_lines, auto_clear, and layout metrics dynamically from the subtitle source properties
 		int src_max_lines = (int)obs_data_get_int(settings, "max_lines");
-		if (src_max_lines > 0 && data->animator) {
-			data->animator->set_max_lines((size_t)src_max_lines);
-		}
 		int src_auto_clear = (int)obs_data_get_int(settings, "auto_clear_seconds");
-		if (src_auto_clear > 0 && data->animator) {
-			data->animator->set_auto_clear_seconds(src_auto_clear);
+		int src_width = (int)obs_data_get_int(settings, "custom_width");
+		obs_data_t *font_obj = obs_data_get_obj(settings, "font");
+		int src_font_size = font_obj ? (int)obs_data_get_int(font_obj, "size") : 45;
+		if (font_obj) obs_data_release(font_obj);
+
+		if (data->animator) {
+			if (src_max_lines > 0)
+				data->animator->set_max_lines((size_t)src_max_lines);
+			if (src_auto_clear > 0)
+				data->animator->set_auto_clear_seconds(src_auto_clear);
+			if (src_width > 0 && src_font_size > 0)
+				data->animator->set_layout_metrics(src_width, src_font_size);
 		}
 
 		obs_data_set_string(settings, "text", display_text.c_str());

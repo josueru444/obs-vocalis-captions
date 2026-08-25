@@ -8,12 +8,12 @@ extern std::string get_filter_connection_status(void* data);
 TranslatorUI::TranslatorUI(ai_filter_data* filter_data, QWidget *parent)
     : QDialog(parent), m_filter_data(filter_data)
 {
-    setWindowTitle("Interfaz Avanzada de Traducción IA");
+    setWindowTitle("Interfaz de Traducción");
     resize(400, 300);
 
     QVBoxLayout* layout = new QVBoxLayout(this);
 
-    QLabel* titleLabel = new QLabel("Traductor IA - Panel de Control", this);
+    QLabel* titleLabel = new QLabel("Traductor - Panel de Control", this);
     QFont titleFont = titleLabel->font();
     titleFont.setPointSize(16);
     titleFont.setBold(true);

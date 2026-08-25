@@ -125,12 +125,23 @@ struct MyCaptionsFont {
 	int cached_max_lines{-1};
 	// Language Badge settings
 	bool cached_show_lang_badge{true};
+	std::string cached_lang_badge_style{"header"};
 	int cached_lang_font_size{22};
 	long long cached_lang_color{0xFFBBBBBB};
 	// Partial/Final color state
 	bool cached_is_partial{false};
 	bool cached_word_wrap{true};
 };
+
+static inline float get_pad_x(const MyCaptionsFont *ctx)
+{
+	return std::max(12.0f, (float)ctx->cached_font_size * 0.40f);
+}
+
+static inline float get_pad_y(const MyCaptionsFont *ctx)
+{
+	return std::max(8.0f, (float)ctx->cached_font_size * 0.28f);
+}
 
 // Count UTF-8 characters
 static size_t utf8_char_count(const std::string &s)
@@ -254,15 +265,19 @@ static void my_font_render(void *data, gs_effect_t *effect)
 
 	uint32_t cx = obs_source_get_width(ctx->text_font);
 	uint32_t cy = obs_source_get_height(ctx->text_font);
-	bool show_badge = ctx->cached_show_lang_badge && !ctx->cached_lang_code.empty();
-	uint32_t lang_cy = show_badge ? obs_source_get_height(ctx->lang_font) : 0;
+
+	float pad_x = get_pad_x(ctx);
+	float pad_y = get_pad_y(ctx);
+
+	bool show_badge_header = (ctx->cached_show_lang_badge &&
+	                          ctx->cached_lang_badge_style == "header" &&
+	                          !ctx->cached_lang_code.empty());
+	uint32_t lang_cy = show_badge_header ? obs_source_get_height(ctx->lang_font) : 0;
+	float badge_gap = (show_badge_header && lang_cy > 0) ? (pad_y * 0.35f) : 0.0f;
 	
-	float bg_width = ctx->cached_fixed_bg_width ? (float)ctx->cached_custom_width : (float)(cx + 20);
-	
-	// Estimate max height for vertical positioning
-	float estimated_line_height = (float)ctx->cached_font_size * 1.4f;
-	float max_height = ctx->cached_max_lines * estimated_line_height + 20.0f + (float)lang_cy;
-	float bg_height = ctx->cached_bottom_align ? max_height : (float)(cy + 20 + lang_cy);
+	float bg_width = ctx->cached_fixed_bg_width ? (float)ctx->cached_custom_width : (float)(cx + pad_x * 2.0f);
+	float content_height = (float)cy + pad_y * 2.0f + (float)lang_cy + badge_gap;
+	float bg_height = content_height;
 
 	// Animation Progress Calculation (350ms smooth cinematic ease-out)
 	uint64_t now = os_gettime_ns();
@@ -304,29 +319,38 @@ static void my_font_render(void *data, gs_effect_t *effect)
 		anim_y_offset = -6.0f * t_out; // subtle float up as it fades out
 	}
 
-	// Horizontal Alignment Offset Calculation
-	float text_cx = (float)cx;
-	float text_offset_x = 10.0f;
-	if (ctx->cached_align == "center") {
-		if (animated_bg_width > text_cx + 20.0f) {
-			text_offset_x = (animated_bg_width - text_cx) / 2.0f;
-		}
-	} else if (ctx->cached_align == "right") {
-		if (animated_bg_width > text_cx + 20.0f) {
-			text_offset_x = animated_bg_width - text_cx - 10.0f;
+	// Bottom-Anchor Float-Up: anchor the bottom line without reserving empty space at top
+	float bottom_y_offset = 0.0f;
+	if (ctx->cached_bottom_align) {
+		float max_h = (float)ctx->cached_max_lines * ((float)ctx->cached_font_size * 1.35f) + pad_y * 2.0f + (float)lang_cy + badge_gap;
+		if (max_h > animated_bg_height) {
+			bottom_y_offset = max_h - animated_bg_height;
 		}
 	}
 
-	float lang_offset_x = 10.0f;
-	if (show_badge && lang_cy > 0) {
+	// Horizontal Alignment Offset Calculation
+	float text_cx = (float)cx;
+	float text_offset_x = pad_x;
+	if (ctx->cached_align == "center") {
+		if (animated_bg_width > text_cx + pad_x * 2.0f) {
+			text_offset_x = (animated_bg_width - text_cx) / 2.0f;
+		}
+	} else if (ctx->cached_align == "right") {
+		if (animated_bg_width > text_cx + pad_x * 2.0f) {
+			text_offset_x = animated_bg_width - text_cx - pad_x;
+		}
+	}
+
+	float lang_offset_x = pad_x;
+	if (show_badge_header && lang_cy > 0) {
 		uint32_t lang_cx = obs_source_get_width(ctx->lang_font);
 		if (ctx->cached_align == "center") {
-			if (animated_bg_width > (float)lang_cx + 20.0f) {
+			if (animated_bg_width > (float)lang_cx + pad_x * 2.0f) {
 				lang_offset_x = (animated_bg_width - (float)lang_cx) / 2.0f;
 			}
 		} else if (ctx->cached_align == "right") {
-			if (animated_bg_width > (float)lang_cx + 20.0f) {
-				lang_offset_x = animated_bg_width - (float)lang_cx - 10.0f;
+			if (animated_bg_width > (float)lang_cx + pad_x * 2.0f) {
+				lang_offset_x = animated_bg_width - (float)lang_cx - pad_x;
 			}
 		}
 	}
@@ -334,9 +358,9 @@ static void my_font_render(void *data, gs_effect_t *effect)
 	// ROOT MATRIX: Transform the whole subtitle card (Background + Badge + Text) as a single unified unit
 	gs_matrix_push();
 
-	// 1. Translate vertically (Slide-up float)
+	// 1. Translate vertically (Slide-up float + Bottom-anchor offset)
 	struct vec3 v_root_trans;
-	vec3_set(&v_root_trans, 0.0f, anim_y_offset, 0.0f);
+	vec3_set(&v_root_trans, 0.0f, anim_y_offset + bottom_y_offset, 0.0f);
 	gs_matrix_translate(&v_root_trans);
 
 	// 2. Scale around center of the card
@@ -367,11 +391,11 @@ static void my_font_render(void *data, gs_effect_t *effect)
 		gs_matrix_pop();
 	}
 
-	// 4. Render Language Badge
-	if (show_badge && lang_cy > 0) {
+	// 4. Render Language Badge (if header mode)
+	if (show_badge_header && lang_cy > 0) {
 		gs_matrix_push();
 		struct vec3 offset_lang;
-		vec3_set(&offset_lang, lang_offset_x, 10.0f, 0.0f);
+		vec3_set(&offset_lang, lang_offset_x, pad_y, 0.0f);
 		gs_matrix_translate(&offset_lang);
 		obs_source_video_render(ctx->lang_font);
 		gs_matrix_pop();
@@ -380,13 +404,8 @@ static void my_font_render(void *data, gs_effect_t *effect)
 	// 5. Render Text
 	gs_matrix_push();
 	struct vec3 offset;
-	if (ctx->cached_bottom_align) {
-		float y_offset = max_height - (float)cy - 10.0f;
-		if (y_offset < 10.0f + (float)lang_cy) y_offset = 10.0f + (float)lang_cy;
-		vec3_set(&offset, text_offset_x, y_offset, 0.0f);
-	} else {
-		vec3_set(&offset, text_offset_x, 10.0f + (float)lang_cy, 0.0f);
-	}
+	float text_y = pad_y + (show_badge_header ? (float)lang_cy + badge_gap : 0.0f);
+	vec3_set(&offset, text_offset_x, text_y, 0.0f);
 	gs_matrix_translate(&offset);
 	obs_source_video_render(ctx->text_font);
 	gs_matrix_pop();
@@ -403,7 +422,8 @@ static uint32_t my_font_get_width(void *data)
 		return 0;
 	if (ctx->cached_fixed_bg_width)
 		return ctx->cached_custom_width;
-	return obs_source_get_width(ctx->text_font) + 20;
+	float pad_x = get_pad_x(ctx);
+	return obs_source_get_width(ctx->text_font) + (uint32_t)(pad_x * 2.0f);
 }
 
 static uint32_t my_font_get_height(void *data)
@@ -411,13 +431,17 @@ static uint32_t my_font_get_height(void *data)
 	MyCaptionsFont *ctx = (MyCaptionsFont *)data;
 	if (ctx->anim_state == SubtitleAnimState::ANIM_IDLE || ctx->displayed_text.empty())
 		return 0;
-	bool show_badge = ctx->cached_show_lang_badge && !ctx->cached_lang_code.empty();
-	uint32_t lang_cy = show_badge ? obs_source_get_height(ctx->lang_font) : 0;
+	float pad_y = get_pad_y(ctx);
+	bool show_badge_header = (ctx->cached_show_lang_badge &&
+	                          ctx->cached_lang_badge_style == "header" &&
+	                          !ctx->cached_lang_code.empty());
+	uint32_t lang_cy = show_badge_header ? obs_source_get_height(ctx->lang_font) : 0;
+	float badge_gap = (show_badge_header && lang_cy > 0) ? (pad_y * 0.35f) : 0.0f;
 	if (ctx->cached_bottom_align) {
-		float estimated_line_height = (float)ctx->cached_font_size * 1.4f;
-		return (uint32_t)(ctx->cached_max_lines * estimated_line_height + 20.0f + (float)lang_cy);
+		float estimated_line_height = (float)ctx->cached_font_size * 1.35f;
+		return (uint32_t)(ctx->cached_max_lines * estimated_line_height + pad_y * 2.0f + (float)lang_cy + badge_gap);
 	}
-	return obs_source_get_height(ctx->text_font) + 20 + lang_cy;
+	return obs_source_get_height(ctx->text_font) + (uint32_t)(pad_y * 2.0f + (float)lang_cy + badge_gap);
 }
 
 static bool on_word_wrap_changed(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
@@ -608,6 +632,12 @@ static obs_properties_t *my_font_get_properties(void *data)
 	// 3. Group: Language Badge
 	obs_properties_t *group_badge = obs_properties_create();
 	obs_properties_add_bool(group_badge, "show_lang_badge", "Mostrar Indicador de Idioma (Badge)");
+	obs_property_t *p_badge_style = obs_properties_add_list(
+		group_badge, "lang_badge_style", "Estilo del Indicador:",
+		OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
+	obs_property_list_add_string(p_badge_style, "Compacto Superior (Encabezado)", "header");
+	obs_property_list_add_string(p_badge_style, "En Línea ([ES] Texto...)", "inline");
+
 	obs_properties_add_int_slider(group_badge, "lang_badge_font_size", "Tamaño de Fuente del Indicador:", 10, 64, 1);
 	obs_properties_add_color_alpha(group_badge, "lang_badge_color", "Color del Texto del Indicador:");
 
@@ -650,6 +680,7 @@ static void my_font_get_defaults(obs_data_t *settings)
 	obs_data_set_default_bool(settings, "antialiasing", true);
 
 	obs_data_set_default_bool(settings, "show_lang_badge", true);
+	obs_data_set_default_string(settings, "lang_badge_style", "header");
 	obs_data_set_default_int(settings, "lang_badge_font_size", 22);
 	obs_data_set_default_int(settings, "lang_badge_color", 0xFFBBBBBB);
 
@@ -715,6 +746,19 @@ static void my_font_update(void *data, obs_data_t *settings)
 		obs_data_release(font_obj);
 	}
 
+	const char *badge_style_str = obs_data_get_string(settings, "lang_badge_style");
+	std::string lang_badge_style = (badge_style_str && *badge_style_str) ? badge_style_str : "header";
+	bool show_lang_badge = obs_data_get_bool(settings, "show_lang_badge");
+
+	const char *lang_code_str = obs_data_get_string(settings, "lang_code");
+	bool has_new_lang_code = false;
+	if (lang_code_str && *lang_code_str) {
+		if (ctx->cached_lang_code != lang_code_str) {
+			ctx->cached_lang_code = lang_code_str;
+			has_new_lang_code = true;
+		}
+	}
+
 	const char *new_text = obs_data_get_string(settings, "text");
 	std::string raw_text;
 	if (new_text != nullptr) {
@@ -725,6 +769,9 @@ static void my_font_update(void *data, obs_data_t *settings)
 	}
 
 	std::string text_to_set = raw_text;
+	if (show_lang_badge && lang_badge_style == "inline" && !ctx->cached_lang_code.empty() && !text_to_set.empty()) {
+		text_to_set = "[" + ctx->cached_lang_code + "] " + raw_text;
+	}
 
 	int final_lines = 1;
 
@@ -734,7 +781,6 @@ static void my_font_update(void *data, obs_data_t *settings)
 		if (chars_per_line < 1) chars_per_line = 20;
 
 		// Calculate visual lines by counting lines per paragraph (separated by \n)
-		// without stripping explicit \n so each paragraph remains on its own line
 		int total_lines = 0;
 		std::string current_para;
 		for (char c : text_to_set) {
@@ -769,12 +815,16 @@ static void my_font_update(void *data, obs_data_t *settings)
 		} else {
 			// Moving from active text to new text -> morph dimensions
 			ctx->anim_start_time = os_gettime_ns();
+			float pad_x = get_pad_x(ctx);
+			float pad_y = get_pad_y(ctx);
+			bool show_badge_header = (show_lang_badge && lang_badge_style == "header" && !ctx->cached_lang_code.empty());
 			uint32_t current_cy = obs_source_get_height(ctx->text_font);
-			uint32_t lang_cy = ctx->cached_lang_code.empty() ? 0 : obs_source_get_height(ctx->lang_font);
-			float max_h = ctx->cached_max_lines * ((float)font_size * 1.4f) + 20.0f + (float)lang_cy;
+			uint32_t lang_cy = show_badge_header ? obs_source_get_height(ctx->lang_font) : 0;
+			float badge_gap = (show_badge_header && lang_cy > 0) ? (pad_y * 0.35f) : 0.0f;
+			float content_h = (float)current_cy + pad_y * 2.0f + (float)lang_cy + badge_gap;
 
-			ctx->prev_bg_width = ctx->cached_fixed_bg_width ? (float)ctx->cached_custom_width : (float)(obs_source_get_width(ctx->text_font) + 20);
-			ctx->prev_bg_height = ctx->cached_bottom_align ? max_h : (float)(current_cy + 20 + lang_cy);
+			ctx->prev_bg_width = ctx->cached_fixed_bg_width ? (float)ctx->cached_custom_width : (float)(obs_source_get_width(ctx->text_font) + pad_x * 2.0f);
+			ctx->prev_bg_height = content_h;
 			ctx->is_new_sentence_anim = false;
 			ctx->anim_state = SubtitleAnimState::ANIM_VISIBLE;
 		}
@@ -808,10 +858,11 @@ static void my_font_update(void *data, obs_data_t *settings)
 	                           ctx->cached_font_size != font_size ||
 	                           ctx->cached_font_style != font_style);
 	
-	// AFTER computing changes, update cached flags
+	bool badge_style_changed = (ctx->cached_lang_badge_style != lang_badge_style);
 	ctx->cached_is_partial = is_partial;
+	ctx->cached_lang_badge_style = lang_badge_style;
 
-	bool should_update_source = (text_changed && !text_to_set.empty()) || appearance_changed || layout_changed;
+	bool should_update_source = (text_changed && !text_to_set.empty()) || appearance_changed || layout_changed || badge_style_changed;
 
 	if (should_update_source) {
 		obs_data_t *text_settings = obs_data_create();
@@ -843,7 +894,7 @@ static void my_font_update(void *data, obs_data_t *settings)
 		obs_data_set_int(text_settings, "extents_cx", custom_width);
 
 		// Compute a reasonable height for the bounding box
-		float estimated_line_height = (float)font_size * 1.4f;
+		float estimated_line_height = (float)font_size * 1.35f;
 		int calc_cy = (int)(final_lines * estimated_line_height + 10.0f);
 		obs_data_set_int(text_settings, "extents_cy", calc_cy);
 
@@ -874,35 +925,31 @@ static void my_font_update(void *data, obs_data_t *settings)
 		obs_data_release(text_settings);
 	}
 	
-	bool show_lang_badge = obs_data_get_bool(settings, "show_lang_badge");
 	int lang_font_size = (int)obs_data_get_int(settings, "lang_badge_font_size");
-	if (lang_font_size <= 0) lang_font_size = 22;
+	if (lang_font_size <= 0) lang_font_size = std::max(14, (int)(font_size * 0.45f));
 	long long lang_color = obs_data_get_int(settings, "lang_badge_color");
 	if (lang_color == 0 && !obs_data_has_user_value(settings, "lang_badge_color")) {
 		lang_color = 0xFFBBBBBB;
 	}
 
-	const char *lang_code_str = obs_data_get_string(settings, "lang_code");
-	bool has_new_lang_code = false;
-	if (lang_code_str && *lang_code_str) {
-		if (ctx->cached_lang_code != lang_code_str) {
-			ctx->cached_lang_code = lang_code_str;
-			has_new_lang_code = true;
-		}
-	}
-
 	bool lang_appearance_changed = (ctx->cached_show_lang_badge != show_lang_badge ||
+	                                ctx->cached_lang_badge_style != lang_badge_style ||
 	                                ctx->cached_lang_font_size != lang_font_size ||
 	                                ctx->cached_lang_color != lang_color ||
 	                                ctx->cached_font_face != font_face);
 
 	if (lang_appearance_changed || has_new_lang_code || (!ctx->cached_lang_code.empty() && text_changed)) {
 		ctx->cached_show_lang_badge = show_lang_badge;
+		ctx->cached_lang_badge_style = lang_badge_style;
 		ctx->cached_lang_font_size = lang_font_size;
 		ctx->cached_lang_color = lang_color;
 
 		obs_data_t *lang_settings = obs_data_create();
-		obs_data_set_string(lang_settings, "text", ctx->cached_lang_code.c_str());
+		if (show_lang_badge && lang_badge_style == "header") {
+			obs_data_set_string(lang_settings, "text", ctx->cached_lang_code.c_str());
+		} else {
+			obs_data_set_string(lang_settings, "text", "");
+		}
 
 		obs_data_t *l_font = obs_data_create();
 		obs_data_set_string(l_font, "face", font_face.c_str());
@@ -1011,8 +1058,15 @@ static void my_font_video_tick(void *data, float seconds)
 		obs_data_set_int(text_settings, "opacity", target_opacity);
 		obs_data_set_int(text_settings, "outline_opacity", new_outline_op);
 		obs_source_update(ctx->text_font, text_settings);
-		obs_source_update(ctx->lang_font, text_settings);
 		obs_data_release(text_settings);
+
+		// Badge remains full opacity
+		int badge_outline_op = (int)(((float)target_opacity / 100.0f) * 100.0f);
+		obs_data_t *lang_settings = obs_data_create();
+		obs_data_set_int(lang_settings, "opacity", target_opacity);
+		obs_data_set_int(lang_settings, "outline_opacity", badge_outline_op);
+		obs_source_update(ctx->lang_font, lang_settings);
+		obs_data_release(lang_settings);
 
 		// Also modulate the background rectangle alpha!
 		if (ctx->cached_bg_color != -1) {
@@ -1043,7 +1097,7 @@ extern "C" struct obs_source_info get_my_font_info()
 	info.icon_type = OBS_ICON_TYPE_BROWSER;
 
 	info.get_name = [](void *) {
-		return "Subtítulos IA";
+		return "Subtítulos";
 	};
 
 	info.create = my_font_create;

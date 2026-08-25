@@ -9,7 +9,7 @@
 TranslatorSettingsDialog::TranslatorSettingsDialog(QWidget *parent)
     : QDialog(parent)
 {
-    setWindowTitle("Configuración del Traductor IA");
+    setWindowTitle("Configuración del Traductor");
     resize(520, 440);
     setupUi();
     loadCurrentSettings();

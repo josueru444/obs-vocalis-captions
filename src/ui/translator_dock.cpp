@@ -78,7 +78,7 @@ void TranslatorDock::setupUi()
         "}";
 
     // ── Warning Banner ──────────────────────────────────────────────────────
-    m_lblWarning = new QLabel("Añada el filtro 'Traductor IA' a su fuente de micrófono en OBS.", container);
+    m_lblWarning = new QLabel("Añada el filtro 'Traductor' a su fuente de micrófono en OBS.", container);
     m_lblWarning->setWordWrap(true);
     m_lblWarning->setStyleSheet("color: #cfd3dc; background-color: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 5px; padding: 6px; font-size: 8.5pt;");
     m_lblWarning->setVisible(false);
@@ -1040,10 +1040,10 @@ extern "C" void init_translator_dock(void)
     QMainWindow *main_window = (QMainWindow *)obs_frontend_get_main_window();
     if (!s_translator_dock) {
         s_translator_dock = new TranslatorDock(main_window);
-        obs_frontend_add_dock_by_id("ai_translator_dock", "Traductor IA", s_translator_dock);
+        obs_frontend_add_dock_by_id("ai_translator_dock", "Traductor", s_translator_dock);
     }
     obs_frontend_add_event_callback(frontend_event_handler, nullptr);
-    obs_frontend_add_tools_menu_item("Ajustes de Traductor IA...", open_settings_tools_cb, nullptr);
+    obs_frontend_add_tools_menu_item("Ajustes del Traductor...", open_settings_tools_cb, nullptr);
 }
 
 extern "C" void free_translator_dock(void)

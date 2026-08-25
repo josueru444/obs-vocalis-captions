@@ -21,6 +21,7 @@ public:
 	// Configuration
 	void set_max_lines(size_t lines);
 	void set_auto_clear_seconds(int seconds);
+	void set_layout_metrics(int custom_width, int font_size);
 
 	// Configure partial update throttle and display lock in milliseconds
 	void set_partial_throttle_ms(int ms);
@@ -41,8 +42,8 @@ private:
 
 	UpdateCallback m_callback;
 
-	// Store confirmed final sentences
-	std::deque<std::string> m_target_confirmed;
+	// Store confirmed final lines (FIFO roll-up queue)
+	std::deque<std::string> m_confirmed_lines;
 
 	// Track active partial sentences by sentence ID
 	std::map<size_t, std::string> m_active_partial;
@@ -63,6 +64,8 @@ private:
 
 	size_t m_max_lines{2};
 	int m_auto_clear_seconds{5};
+	int m_custom_width{900};
+	int m_font_size{45};
 
 	// Throttle partial display updates in milliseconds
 	int m_partial_throttle_ms{1500};
