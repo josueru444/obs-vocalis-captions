@@ -183,8 +183,8 @@ El gestor de modelos integrado en el panel Dock permite descargar y alternar ent
 
 | Identificador | Tamaño | Velocidad | Precisión | Escenario Recomendado |
 | :--- | :--- | :--- | :--- | :--- |
-| `ggml-tiny.bin` | ~75 MB | Muy Alta | Básica | Hardware limitado o donde prime la latencia sobre la exactitud |
-| `ggml-base.bin` | ~142 MB | Alta | Equilibrada | Configuración estándar recomendada para uso general |
+| `ggml-tiny.bin` | ~75 MB | Muy Alta | Básica | **Incluido por defecto**. Hardware limitado o donde prime la latencia sobre la exactitud |
+| `ggml-base.bin` | ~142 MB | Alta | Equilibrada | Configuración estándar recomendada para uso general (Descargable desde OBS) |
 | `ggml-small.bin` | ~466 MB | Media-Alta | Alta | Alta precisión en español y traducción general |
 | `ggml-medium.bin` | ~1.5 GB | Media | Muy Alta | Entornos con GPU dedicada |
 | `ggml-large-v3-turbo.bin` | ~1.5 GB | Media-Alta | Estado del Arte | Balance óptimo entre precisión v3 y velocidad de inferencia |
@@ -255,7 +255,7 @@ cmake --build build_x64 --config Release
 
 El sistema CMake está preparado para que **no tengas que copiar archivos manualmente**:
 
-1. **Descarga automática de modelos IA:** Durante la configuración inicial de CMake (`cmake -B ...`), se descargarán automáticamente los modelos esenciales (`ggml-tiny.bin`, `ggml-base.bin`, `ggml-small.bin` y Silero VAD) directamente a la carpeta `models/`.
+1. **Descarga automática de modelos IA indispensables:** Durante la configuración inicial de CMake (`cmake -B ...`), se descargarán automáticamente los modelos esenciales (`ggml-tiny.bin` y Silero VAD) directamente a la carpeta `models/`. Los modelos de mayor capacidad (`base`, `small`, etc.) pueden descargarse directamente desde el panel de OBS bajo demanda.
 2. **Copia automática del plugin y recursos (Post-Build):**
    - **En Linux:** Al finalizar la compilación, CMake creará los directorios e instalará automáticamente el archivo `.so`, los modelos IA y las traducciones en:
      ```

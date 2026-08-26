@@ -9,8 +9,6 @@ set(MODEL_URL_silero_vad.bin "https://huggingface.co/ggml-org/whisper-vad/resolv
 
 set(REQUIRED_MODELS
     "ggml-tiny.bin"
-    "ggml-base.bin"
-    "ggml-small.bin"
     "silero_vad.bin"
 )
 

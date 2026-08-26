@@ -327,7 +327,7 @@ void TranslatorSettingsDialog::loadCurrentSettings()
     m_widgetCustomInterval->setVisible(isCustom);
 
     const char *model = obs_data_get_string(settings, "model_settings");
-    int model_idx = m_cmbModel->findData(model ? model : "ggml-base.bin");
+    int model_idx = m_cmbModel->findData(model ? model : "ggml-tiny.bin");
     if (model_idx >= 0) m_cmbModel->setCurrentIndex(model_idx);
 
     bool use_custom = obs_data_get_bool(settings, "use_custom_model");

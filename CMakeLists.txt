@@ -370,10 +370,12 @@ endif()
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE whisper)
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE vendor/whisper.cpp/include)
 
-# Auto-download missing models (tiny, base, small, silero_vad)
+# Auto-download missing models (only tiny and silero_vad)
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/download_models.cmake")
 
-# Install model files into plugin data folder
-install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/models/"
+# Install model files into plugin data folder (only tiny and silero_vad bundled)
+install(FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/models/ggml-tiny.bin"
+        "${CMAKE_CURRENT_SOURCE_DIR}/models/silero_vad.bin"
         DESTINATION "${CMAKE_PROJECT_NAME}/data/models"
         OPTIONAL)

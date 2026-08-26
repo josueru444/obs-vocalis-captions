@@ -39,8 +39,8 @@ void WhisperModelManager::initCatalog()
     const QString baseUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/";
 
     m_models = {
-        {"tiny", "Tiny (Rápido)", "ggml-tiny.bin", "75 MB", baseUrl + "ggml-tiny.bin", "Multilingüe", false, false, 0, 0, 0},
-        {"base", "Base (Recomendado)", "ggml-base.bin", "142 MB", baseUrl + "ggml-base.bin", "Multilingüe", false, false, 0, 0, 0},
+        {"tiny", "Tiny (Incluido / Rápido)", "ggml-tiny.bin", "75 MB", baseUrl + "ggml-tiny.bin", "Multilingüe", false, false, 0, 0, 0},
+        {"base", "Base (Balanceado)", "ggml-base.bin", "142 MB", baseUrl + "ggml-base.bin", "Multilingüe", false, false, 0, 0, 0},
         {"small", "Small (Alta Calidad)", "ggml-small.bin", "466 MB", baseUrl + "ggml-small.bin", "Multilingüe", false, false, 0, 0, 0},
         {"medium", "Medium (Preciso)", "ggml-medium.bin", "1.5 GB", baseUrl + "ggml-medium.bin", "Multilingüe", false, false, 0, 0, 0},
         {"large-v3-turbo", "Large v3 Turbo (Óptimo)", "ggml-large-v3-turbo.bin", "1.5 GB", baseUrl + "ggml-large-v3-turbo.bin", "Multilingüe", false, false, 0, 0, 0},

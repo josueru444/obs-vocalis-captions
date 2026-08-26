@@ -946,7 +946,7 @@ static void ai_filter_update(void *data, obs_data_t *settings)
 	} else {
 		const char *model_size = obs_data_get_string(settings, "model_settings");
 		char rel[256];
-		snprintf(rel, sizeof(rel), "models/%s", (model_size && *model_size) ? model_size : "ggml-base.bin");
+		snprintf(rel, sizeof(rel), "models/%s", (model_size && *model_size) ? model_size : "ggml-tiny.bin");
 
 		char *cfg_path = obs_module_config_path(rel);
 		if (cfg_path && os_file_exists(cfg_path)) {
@@ -1290,7 +1290,7 @@ static void ai_filter_get_defaults(obs_data_t *settings)
 	obs_data_set_default_string(settings, "target_source_name", "");
 	obs_data_set_default_string(settings, "lang_in", "es");
 	obs_data_set_default_string(settings, "lang_out", "en");
-	obs_data_set_default_string(settings, "model_settings", "ggml-base.bin");
+	obs_data_set_default_string(settings, "model_settings", "ggml-tiny.bin");
 	obs_data_set_default_string(settings, "custom_model_path", "");
 	obs_data_set_default_int(settings, "whisper_threads", 4);
 	obs_data_set_default_bool(settings, "use_custom_model", false);
